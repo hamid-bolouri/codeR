@@ -1,0 +1,94 @@
+---
+title: "shelfLife_HD.SLE_pathwayFigs"
+author: "HB"
+date: "8/11/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 120),
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+### Allocate memory  and use all CPUs
+
+```{r}
+library(future)
+plan(strategy = "multiprocess", workers = 8)    ############## set number of CPUs #################
+options(future.globals.maxSize = 20 * 1024 ^ 3)
+
+library("future.apply")
+library("stats")
+```
+
+## 
+
+```{r getData}
+# Healthy Donor data:
+setwd("~/__Data")
+HD.DE.2.4 <- get(load("shelfLife_HD_DE2to4hr_pVals_adjFDR_v2.RData"))
+HD.markersList <- lapply(HD.DE.2.4, function(x) names(x)) 
+
+setwd("~/__Data")
+HD.keggPathways <- get(load("keggPathways_shelfLifeHD_DE2to4.RData"))
+
+# SLE data:
+setwd("~/__Data/shelfLifeSLE")
+SLE.DE.2.4 <- get(load("shelfLifeSLE_DE2to4hr_pVals_adjFDR_v2.RData"))
+SLE.markersList <- lapply(SLE.DE.2.4, function(x) names(x)) 
+
+setwd("~/__Data/shelfLifeSLE")
+SLE.keggPathways <- get(load("shelfLifeSLE_keggPathways_shelfLifeHD_DE2to4.RData"))
+
+```
+
+## 
+
+```{r makePlots}
+library(pathview)
+
+allMarkers <- unique(unlist(c(SLE.markersList, HD.markersList))) # 2,791 genes
+
+recurrHD <- table(unlist(HD.markersList))
+recurrHD <- names(recurrHD[recurrHD > 1]) # 581
+
+recurrSLE <- table(unlist(SLE.markersList))
+recurrSLE <- names(recurrSLE[recurrSLE > 1]) # 520
+
+recurrentMarkers <- table(c(recurrHD, recurrSLE)) # 837
+recurrentMarkers <- names(recurrentMarkers[recurrentMarkers > 1]) # 264
+
+markerEGs <- id2eg(recurrentMarkers)[ ,'ENTREZID']
+markerEGs <- markerEGs[!is.na(markerEGs)]
+
+allEGs <- id2eg(allMarkers)[ ,'ENTREZID']
+allEGs <- allEGs[!is.na(allEGs)] # 2,719
+
+pathAnnot <- pathview(gene.data = markerEGs, pathway.id = "05135", 
+                      species = "hsa", out.suffix = "_shelfLife_Yersinia")
+head(pathAnnot$plot.data.gene) # must execute this in concole to get plot
+
+pathAnnot <- pathview(gene.data = markerEGs, pathway.id = "05164", 
+                      species = "hsa", out.suffix = "_shelfLife_Influenza")
+head(pathAnnot$plot.data.gene) # must execute this in concole to get plot
+
+pathAnnot <- pathview(gene.data = markerEGs, pathway.id = "05140", 
+                      species = "hsa", out.suffix = "_shelfLife_Leishmaniasis")
+head(pathAnnot$plot.data.gene) # must execute this in concole to get plot
+
+pathAnnot <- pathview(gene.data = markerEGs, pathway.id = "04145", 
+                      species = "hsa", out.suffix = "_shelfLife_phagosome")
+head(pathAnnot$plot.data.gene) # must execute this in concole to get plot
+
+pathAnnot <- pathview(gene.data = allEGs, pathway.id = "05135", 
+                      species = "hsa", out.suffix = "_shelfLife_Yersinia_allDE")
+head(pathAnnot$plot.data.gene) # must execute this in concole to get plot
+
+# phagosome 04145
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

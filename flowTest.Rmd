@@ -1,0 +1,29 @@
+---
+title: "flowTest"
+author: "HB"
+date: "7/29/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 
+```{r readFiles}
+library(flowUtils)
+library(flowCore)
+library("flowViz")
+
+
+setwd("~/__Data/")
+fcsFile <- read.FCS("190717_Allen_WB_Validation1_Day0_CytoChexRT_Subj1_01_1.fcs")
+# Use 'read.flowSet()' for a set of files. Accessor: [[.]] and $
+
+exprs(fcsFile) # has the expression matrix
+
+pData(parameters(fcsFile)) 
+# column 'name' has the colnames of 'exprs'.
+# column 'desc' has marker IDs.
+```
+

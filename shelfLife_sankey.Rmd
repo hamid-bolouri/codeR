@@ -1,0 +1,98 @@
+---
+title: "shelfLife_Sankey"
+author: "HB"
+date: "6/22/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 
+
+```{r sankeyPlot}
+
+setwd("~/__Data/shelfLife_reAnalysis/")
+c10 <- read.csv("clustersK10.csv", as.is=TRUE)
+c10A <- read.csv("clustersK10.csv", as.is=TRUE)
+c11 <- read.csv("clustersK11.csv", as.is=TRUE)
+c15 <- read.csv("clustersK15.csv", as.is=TRUE) 
+c20 <- read.csv("clustersK20.csv", as.is=TRUE)
+c20A <- c20
+c10B <- c10
+
+setwd("~/__Data")
+normalizedPBMC <- get(load("SeuratNormalizedCounts_GRCh38_filteredMT.RData"))
+hr18 <- colnames(normalizedPBMC)[grep("-18h$", colnames(normalizedPBMC))] # 25,535
+hr18 <- unlist(lapply(sapply(hr18, function(y) strsplit(y, "BRISL")), function(x) x[1]))
+
+c10A[match(hr18, c10A$Barcode), "Cluster"] <- 18
+c11[match(hr18, c11$Barcode), "Cluster"] <- 18
+c15[match(hr18, c15$Barcode), "Cluster"] <- 18
+c20A[match(hr18, c20$Barcode), "Cluster"] <- 18
+c10B[match(hr18, c10$Barcode), "Cluster"] <- paste0("x", c10B[match(hr18, c10$Barcode), "Cluster"])
+c10B[!grepl("x", c10B$Cluster), "Cluster"] <- "E"
+
+# make a dataframe with cols==cluster numbers from cellranger
+# NB identical(rownames(c10), rownames(c15)) == TRUE
+DF <- cbind(c10$Cluster, c10B$Cluster) # , c11$Cluster, c15$Cluster, c20$Cluster
+# colnames(DF) <- c("K10", "K20+18") # , "K11", K15", "K20"
+
+myColors <- c("#0057e7", "#ff9955", "#008744", "#d62d20", "#990099", 
+              "#67000f", "#ff00ff", "#cccccc", "#ded2b9", "#00ffff", "#000000") 
+              #### Not sure why my colors no longer match ####
+
+library(flipPlots)
+SankeyDiagram(DF, font.size = 10, font.family = "Arial", label.show.varname = FALSE,
+              link.color = "Source", max.categories = 40,
+              hovertext.show.percentages = TRUE, colors = myColors) 
+
+```
+
+
+
+
+
+
+
+```{r k1.to.K11}
+setwd("~/__Data")
+normalizedPBMC <- get(load("SeuratNormalizedCounts_GRCh38_filteredMT.RData"))
+
+setwd("~/__Data/shelfLife_reAnalysis/")
+# c1 <- read.csv("clustersK1.csv", as.is=TRUE)
+# c2 <- read.csv("clustersK2.csv", as.is=TRUE)
+c3 <- read.csv("clustersK3.csv", as.is=TRUE)
+c4 <- read.csv("clustersK4.csv", as.is=TRUE)
+c5 <- read.csv("clustersK5.csv", as.is=TRUE)
+c6 <- read.csv("clustersK6.csv", as.is=TRUE)
+c7 <- read.csv("clustersK7.csv", as.is=TRUE)
+c8 <- read.csv("clustersK8.csv", as.is=TRUE)
+c9 <- read.csv("clustersK9.csv", as.is=TRUE)
+c10 <- read.csv("clustersK10.csv", as.is=TRUE)
+c11 <- read.csv("clustersK11.csv", as.is=TRUE)
+
+c1 <- c3; c1$Cluster <- 1
+
+# make a dataframe with cols==cluster numbers from cellranger
+# NB identical(rownames(c10), rownames(c15)) == TRUE
+DF <- cbind(c1$Cluster, c3$Cluster, c4$Cluster, c5$Cluster, c6$Cluster, 
+            c7$Cluster, c8$Cluster, c9$Cluster, c10$Cluster, c11$Cluster) 
+colnames(DF) <- paste0("C", 1:10)
+
+myColors <- c("#0057e7", "#ff9955", "#008744", "#d62d20", "#990099", 
+              "#67000f", "#ff00ff", "#cccccc", "#ded2b9", "#00ffff", "#000000") 
+              #### Not sure why my colors no longer match ####
+
+library(flipPlots)
+SankeyDiagram(DF, font.size = 20, font.family = "Arial", label.show.varname = FALSE,
+              link.color = "Target", max.categories = 40, variables.share.values=TRUE,
+              hovertext.show.percentages = TRUE, colors = myColors) 
+
+
+```
+
+
+
+

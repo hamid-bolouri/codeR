@@ -23,7 +23,7 @@ knitr::opts_chunk$set(
 
 ```{r}
 library(future)
-plan(strategy = "multiprocess", workers = 8)    ############## set number of CPUs #################
+plan(strategy = "multiprocess", workers = 96)    ############## set number of CPUs #################
 options(future.globals.maxSize = 20 * 1024 ^ 3)
 
 library("future.apply")
@@ -42,8 +42,10 @@ library(dplyr)
 library(Seurat)
 
 # Load the PBMC dataset
-setwd("~/__Data")
-load("Aggr_Human_Immunology_RTX-850_GRCh38-3.0.0_mat_v3_reads.RData")
+setwd("~/__Data/shelfLifeLSE/")
+load("Aggr_Human_Immunology_RTX-850-856_GRCh38-3.0.0_premrna_mat_v3_reads.RData")
+meta <- get(load("Aggr_Human_Immunology_RTX-850-856_GRCh38-3.0.0_premrna_samp.dat_v3_reads.RData"))
+
 
 # Initialize the Seurat object with the raw (non-normalized data).
 pbmc <- CreateSeuratObject(counts = mat, project = "pbmcAging", min.cells = 3, min.features = 200)
@@ -333,7 +335,7 @@ for (i in 1:length(selGenes)) {
 }
 
 setwd("~/__Data")
-save(avExpList, file="avExpList_HD_noFilter.RData")
+save(avExpList, file="avExpList.RData")
 ```
 
 ## Expression correlation

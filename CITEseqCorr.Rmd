@@ -1,0 +1,72 @@
+---
+title: "CITEseq_mrNA_protein_corr"
+author: "HB"
+date: "6/21/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(future)
+plan(strategy = "multiprocess", workers = 8)
+options(future.globals.maxSize = 20 * 1024 ^ 3)
+
+library("future.apply")
+library("stats")
+# future_lapply(1:10, FUN = quantile, probs = 1:3/4)
+```
+## R Markdown
+
+```{r corr_mRNA_prot}
+setwd("~/__Data/CITEseq/")
+umi <- read.csv("GSE100866_CBMC_8K_13AB_10X-RNA_umi.csv", row.names=1)
+ADT <- read.csv("GSE100866_CBMC_8K_13AB_10X-ADT_clr-transformed.csv", row.names=1)
+
+umi <- t(umi)
+ADT <- t(ADT)
+
+myCorr <- function(x) {
+   val = rcorr(x, ADT)
+   return(val)
+}
+
+library(Hmisc)
+corList = list()
+corList <- future_apply(umi, 2, FUN=myCorr)
+
+res <- lapply(corList, function(x) { 
+   R <- x$r[1, ]
+   P <- x$P[1, ]
+   R[which(P > 0.05 | abs(R) < 0.5)] <- NA
+   R <- R[-1]
+   if (any(!is.na(R))) return(R)
+   })
+
+res <- unlist(res)
+res<- res[!is.na(res)]
+
+corrGenes <- strsplit(gsub("HUMAN_", "", names(res)), "\\.CD")
+corrGenes <- do.call(rbind, corrGenes)
+colnames(corrGenes) <- c("mRNA", "protein")
+corrGenes[ ,"protein"] <- paste0("CD", corrGenes[ ,"protein"])
+corrGenes <- corrGenes[order(corrGenes[ ,"protein"]), ]
+
+plot(log2(umi[ ,"HUMAN_LTB"]+1), ADT[ ,"CD11c"], pch=20, col=rgb(0,0.65,1,0.25), 
+     ylab="log normalized CD11c protein") 
+FIT <- lm(ADT[ ,"CD11c"] ~ log2(umi[ ,"HUMAN_LTB"]+1))
+abline(FIT, col="red", lwd=2, lty=2)
+
+score <- (log2(umi[ ,"HUMAN_TYROBP"]+1) + log2(umi[ ,"HUMAN_S100A4"]+1)) / (log2(umi[ ,"HUMAN_LTB"]+1) + 1)
+corrCoeff <- signif(cor(score, ADT[ ,"CD11c"]), 2)
+plot(score, ADT[ ,"CD11c"], pch=20, col=rgb(0,0.65,1,0.25), 
+     ylab="log normalized CD11c protein", main=paste0("correlation ~ ", corrCoeff))
+FIT <- lm(ADT[ ,"CD11c"] ~ score)
+abline(FIT, col="red", lwd=2, lty=2)
+
+
+
+```
+

@@ -1,0 +1,264 @@
+---
+title: "DC_subsets"
+author: "HB"
+date: "08/25/2019"
+output:
+  html_document:
+    theme: united
+    df_print: kable
+date: 'Compiled: `r format(Sys.Date(), "%B %d, %Y")`'
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 120),
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+### Allocate memory  and use all CPUs
+
+```{r}
+library(future)
+plan(strategy = "multiprocess", workers = 8)    ############## set number of CPUs #################
+options(future.globals.maxSize = 20 * 1024 ^ 3)
+
+library("future.apply")
+library("stats")
+```
+
+```{r VillaniData}
+DC1 = c("CLEC9A","C1ORF54","CADM1","CAMK2D","IDO1","XCR1","CD59")
+DC2 = c("CD1C","FCER1A","CLEC10A","ADAM8","CD1D","FCGR2B")
+DC3 = c("S100A9","S100A8","VCAN","RNASE2","CD1C","FCER1A","CLEC10A")
+DC4 = c("FCGR3A","FTL","SERPINA1","LST1","AIF1","LILRB2","TMEM176B","LOC200772","CLEC4F")
+DC5 = c("AXL","PPP1R14A","SIGLEC6","CD22","CD5","SIGLEC1","DAB2")
+DC6 = c("GZMB","IGJ","AK128525","SERPINF1","ITM2C","TCF4","CLEC4C","NRP1","IL3RA","IRF7","IRF8","BLNK")
+Mono1 = c("CD14","VCAN","S100A8","S100A9","FCN1","ITGAM")
+Mono2 = c("LAIR2","ASAH1","APOBEC3A","TSPAN14","LIPA","ITGAM")
+Mono3 = c("G0S2","CXCR1","CXCR2","NAMPT","NEAT1","AL137655","CSF3R","CD14","VCAN","S100A8","S100A9","FCN1","ITGAM")
+Mono4 = c("PRF1","GNLY","CTSW","FGFBP2","IL2RB","GZMA","CD14","VCAN","S100A8","S100A9","FCN1","ITGAM")
+
+# setwd("~/__Data/_DC_subsets")
+# pubMat <- read.delim("raw_expression_matrix")
+
+```
+
+```{r deep2Hr}
+library("tidyverse")
+library("Matrix")
+library("Seurat")
+library("scater")
+
+CLs <- read.csv("/home/hamid.bolouri/__Data/Aldan.deep2hr/clustering/kmeans_30_clusters/clusters.csv",
+                row.names=1)
+tsneCoords <- read.csv("~/__Data/Aldan.deep2hr/tsne/2_components/projection.csv", row.names=1)
+tsneCoords <- as.matrix(tsneCoords)
+
+# mat <- Read10X("/home/hamid.bolouri/__Data/Aldan.deep2hr")
+# pbmc <- CreateSeuratObject(counts=mat, project="shelfLife", meta.data=CLs)
+# 
+# rm(mat) # clean up
+# gc()    # clear memory
+
+# setwd("/home/hamid.bolouri/__Data/Aldan.deep2hr")
+# pbmc <- readRDS("AldanDeep2Hr_Seurat.RDS")
+
+setwd("~/__Data")
+pbmc <- readRDS("deep2HrLogNormalizedSeurat.RDS")
+
+indx <- match(rownames(CLs), colnames(pbmc))
+pbmc <- pbmc[ , indx[!is.na(indx)]]
+CLs <- CLs[which(!is.na(indx)), 1, drop=FALSE]
+
+# Idents(pbmc) <- paste0("C", CLs$Cluster) # using cellRanger clusters
+
+# pbmc <- NormalizeData(pbmc, normalization.method = "LogNormalize", scale.factor = 10000)
+
+# setwd("~/__Data")
+# saveRDS(pbmc, file="deep2HrLogNormalizedSeurat.RDS")
+
+setwd("~/__Plots")
+pbmc.sce <- as.SingleCellExperiment(pbmc)
+
+indx <- match(rownames(tsneCoords), colnames(pbmc))
+tsneCoords <- tsneCoords[which(!is.na(indx)), ]
+
+reducedDim(pbmc.sce) <- tsneCoords
+reducedDimNames(pbmc.sce) <- "tSNE"
+
+# setwd("~/__Data/DC_subsets")
+# pdf("B_CD19.pdf")
+# plotExpression(pbmc.sce, features = "CD19", x = "ident", colour_by = "ident",
+#                xlab="CellRanger clusters", add_legend = FALSE) +
+# theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# plotReducedDim(pbmc.sce, use_dimred = "tSNE", colour_by = "CD19")
+# dev.off()
+
+# setwd("~/__Data/DC_subsets")
+# pdf("NK_TBX21.pdf")
+# plotExpression(pbmc.sce, features = "TBX21", x = "ident", colour_by = "ident",
+#                xlab="CellRanger clusters", add_legend = FALSE) +
+# theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# plotReducedDim(pbmc.sce, use_dimred = "tSNE", colour_by = "TBX21")
+# dev.off()
+
+indx <- match(CLs$Cluster, c(1:6,7:9, 10:14,16:18,18:19,21:23,24:29)) 
+# To remove NKs, based on co-expression of NCAM1 (CD56) and TBET (TBX21), removed C7, C9
+indx <- which(is.na(indx)) 
+selPBMC <- pbmc.sce[ , indx] # 947 presumed DCs
+
+# setwd("~/__Data/DC_subsets")
+# pdf("selPBMC_markers.pdf")
+# plotReducedDim(selPBMC, use_dimred = "tSNE", colour_by = "IL13RA1")
+# plotReducedDim(selPBMC, use_dimred = "tSNE", colour_by = "FTL")
+# plotReducedDim(selPBMC, use_dimred = "tSNE", colour_by = "S100A9")
+# plotReducedDim(selPBMC, use_dimred = "tSNE", colour_by = "CD1C")
+# dev.off()
+
+# library("pheatmap")
+markers = unique(c(DC1, DC2, DC3, DC4, DC5, DC6, Mono1, Mono2, Mono3, Mono4)) # ADDED Monos, but only for use with "subSel"
+indx <- match(markers, rownames(selPBMC))
+selGenesCells <- selPBMC[indx[!is.na(indx)], ]
+M <- as.matrix(assays(selGenesCells)[["logcounts"]])
+scaledM <- apply(M, 1, scale)
+scaledM[is.na(scaledM)] <- 0
+scaledM[scaledM > 1] <- 1
+scaledM[scaledM < -1] <- -1
+# 
+# setwd("~/__Data/DC_subsets")
+# pdf("selPBMC_DCmarkerGenes_heatmap_4.pdf")
+# myColors <- viridis(32, alpha = 1)
+# pheatmap(t(scaledM), scale="none", show_colnames=FALSE, color=myColors)
+# dev.off()
+
+library(Rtsne)
+MM <- t(M)
+MM <- MM[which(!duplicated(MM)), ]
+tsneM <- Rtsne(MM, perplexity = 50)
+rownames(tsneM$Y) <- rownames(MM)
+colnames(tsneM$Y) <- c("sel_tSNE1", "sel_tSNE2")
+
+# setwd("~/__Data/DC_subsets")
+# pdf("tsne_selPBMC_DCmarkers_v5.pdf")
+# for (j in colnames(MM)) {
+#    A <- MM[ , j] / max(MM[ , j])
+#    plot(tsneM$Y, col=rgb(0,0,0,0.1), pch=1, cex=0.5,
+#         xlab="tSNE1", ylab="tSNE2", main=paste0(j))
+#    points(tsneM$Y, pch=20, col=rgb(0,0.25,0.75,A), cex=0.5)
+# }
+# dev.off()
+
+```
+
+```{r VillaniPaper}
+selSeurat <- as.Seurat(selPBMC)
+DimPlot(selSeurat, reduction = "tSNE") + NoLegend()
+
+selSeurat <- FindVariableFeatures(object = selSeurat, 
+        selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+
+selSeurat <- ScaleData(selSeurat)
+selSeurat <- RunPCA(selSeurat, do.print=FALSE)
+DimPlot(selSeurat, reduction = "pca") + NoLegend()
+ElbowPlot(selSeurat)
+
+selSeurat <- RunTSNE(selSeurat, dims.use = 1:15, max_iter=2000)
+
+setwd("~/__Data/DC_subsets")
+pdf("selDCsFrom2HrPBMC_tSNE.pdf")
+DimPlot(selSeurat, reduction = "tsne") + NoLegend()
+dev.off()
+
+setwd("~/__Data/DC_subsets")
+metaVillani <- read.delim("Villani_clusterIDs_blackList.txt", header=TRUE,
+                           as.is=TRUE)
+clustVillani <- read.delim("Villani_clusterIDs.txt", header=TRUE,
+                           as.is=TRUE)
+expVillani <- read.delim("GSE94820_raw.expMatrix_DCnMono.discovery.set.submission.txt", header=TRUE,
+                           as.is=TRUE)
+
+vIDs <- gsub("_rsem", "", clustVillani$cellID)
+indx <- match(vIDs, colnames(expVillani)) # Of 1140 cells, 1077 have Mono/DC cluster labels
+vClusts <- clustVillani$clusterID[which(!is.na(indx))] # 751 DCs
+expVillani <- expVillani[ , indx]
+names(vClusts) <- colnames(expVillani)
+
+# Rename microRNAs with "_" in names
+rownames(expVillani) <- gsub("_", "-", rownames(expVillani))
+
+vSeurat <- CreateSeuratObject(expVillani, project = "Villani", assay = "RNA",
+                              min.cells = 5, min.features = 100, names.field = 1,
+                              names.delim = "_")
+Idents(vSeurat) <- vClusts
+# vSeurat <- vSeurat[ , order(vClusts)]
+
+vSeurat <- NormalizeData(object = vSeurat, verbose = FALSE)
+vSeurat <- FindVariableFeatures(object = vSeurat, 
+        selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+
+vSeurat <- ScaleData(vSeurat)
+vSeurat <- RunPCA(vSeurat, do.print=FALSE)
+
+DimPlot(vSeurat, reduction = "pca", cols=c("gray10", "gray30", "gray50", "gray70", "gray90", "black", 
+                                           "gold", "tan1", "orange", "red", "darkred"))
+ElbowPlot(vSeurat)
+
+vSeurat <- RunTSNE(vSeurat, dims.use = 1:15, max_iter=2000)
+
+setwd("~/__Data/DC_subsets")
+pdf("Villani_tSNE.pdf")
+DimPlot(vSeurat, reduction = "tsne", cols=c("blue", "black", "cyan", "forestgreen", "limegreen", "gray85", 
+                                           "gold", "tan1", "orange", "red", "darkred"))
+dev.off()
+
+
+transfer.anchors <- FindTransferAnchors(reference = vSeurat, query = selSeurat, 
+                                        features = VariableFeatures(object = vSeurat), 
+                                        reference.assay = "RNA", query.assay = "RNA", 
+                                        reduction = "cca")
+celltype.predictions <- TransferData(anchorset = transfer.anchors, refdata = Idents(vSeurat), 
+    weight.reduction = "cca")
+selSeurat <- AddMetaData(selSeurat, metadata = celltype.predictions)
+
+vSeurat <- AddMetaData(object = vSeurat, metadata = vClusts, col.name = 'cClusters')
+
+setwd("~/__Data/DC_subsets")
+pdf("selDCsFrom@hrPBMC_tSNE_VillaniLabels_v2.pdf")
+DimPlot(selSeurat, label = FALSE, repel = TRUE, group.by = 'predicted.id',
+        cols=c("blue", "cyan", "forestgreen", "limegreen", "black", "gray85", 
+        "gold", "tan1", "orange", "red", "darkred"), reduction = "tsne") 
+dev.off()
+
+
+subSel <- SubsetData(selSeurat, cells = rownames(tsneM$Y))
+subSel[["selTSNE"]] <- CreateDimReducObject(embeddings = tsneM$Y, key = "sel_", 
+                                            assay = DefaultAssay(subSel))
+
+# DimPlot(subSel, reduction = "selTSNE", pt.size = 0.5)  + NoLegend()
+
+transfer.anchors <- FindTransferAnchors(reference = vSeurat, query = subSel, 
+                                        features = VariableFeatures(object = vSeurat), 
+                                        reference.assay = "RNA", query.assay = "RNA", 
+                                        reduction = "cca")
+celltype.predictions <- TransferData(anchorset = transfer.anchors, refdata = Idents(vSeurat), 
+    weight.reduction = "cca")
+selSeurat <- AddMetaData(subSel, metadata = celltype.predictions)
+
+setwd("~/__Data/DC_subsets")
+pdf("selDCsFrom@hrPBMC_tSNE_VillaniLabels_onlyGenesFromMonoDC.pdf")
+DimPlot(subSel, label = FALSE, repel = TRUE, group.by = 'predicted.id',
+        cols=c("blue", "black", "cyan", "forestgreen", "limegreen", "gray85",
+        "gold", "tan1", "orange", "red", "darkred"), reduction = "tsne")
+dev.off()
+
+
+
+setwd("~/__Data/DC_subsets")
+saveRDS(vSeurat, file="villaniSeuratObj.RDS")
+saveRDS(selSeurat, file="myDCsFrom2hrPBMC_SeuratObj.RDS")
+```
+

@@ -1,7 +1,7 @@
 ---
-title: "shelfLife_v2"
+title: "shelfLife_SLE"
 author: "HB"
-date: "July/7/2019"
+date: "July/10/2019"
 output:
   html_document:
     theme: united
@@ -23,7 +23,7 @@ knitr::opts_chunk$set(
 
 ```{r}
 library(future)
-plan(strategy = "multiprocess", workers = 8)    ############## set number of CPUs #################
+plan(strategy = "multiprocess", workers = 64)    ############## set number of CPUs #################
 options(future.globals.maxSize = 20 * 1024 ^ 3)
 
 library("future.apply")
@@ -42,15 +42,45 @@ library(dplyr)
 library(Seurat)
 
 # Load the PBMC dataset
-setwd("~/__Data")
-load("Aggr_Human_Immunology_RTX-850_GRCh38-3.0.0_mat_v3_reads.RData")
+setwd("~/__Data/shelfLifeSLE/outs")
+SLE <- Read10X("filtered_feature_bc_matrix") # 33,538 x 141,853
 
-# Initialize the Seurat object with the raw (non-normalized data).
-pbmc <- CreateSeuratObject(counts = mat, project = "pbmcAging", min.cells = 3, min.features = 200)
-rm(mat)
+setwd("~/__Data/shelfLifeSLE/")
+meta <- get(load("Aggr_Human_Immunology_RTX-850-856_GRCh38-3.0.0_premrna_samp.dat_v3_reads.RData"))
+selMetaCols <- c("library_id", "Lib_Name", "Sample_Name", "time_point", 
+                 "doublet.score", "Exclude", "Exclude2")
+selMetaCols <- c(1, match(selMetaCols, colnames(meta)))
+
+colNames <- unlist(lapply(strsplit(colnames(SLE), "-"), function(x) x[1]))
+
+# cell barcodes are only unique _within_ libs, so match per library:
+myMat = colData = NULL
+for (libID in c("^BRISL5-","^BRISL6-","^BRISL7-")) {
+   print(libID)
+   iLib <- grep(libID, meta$Lib_Name) 
+   metaLib <- meta[iLib, ]
+   
+   metaTags <- unlist(lapply(strsplit(metaLib[ , 1], "-"), function(x) x[1])) 
+   
+   iGood <- match(metaTags, colNames)
+   myMat <- cbind(myMat, SLE[ , iGood[!is.na(iGood)]])
+   colData <- rbind(colData, metaLib[which(!is.na(iGood)), selMetaCols])
+} # ncol(myMat) == nrow(colData) == 138,788
+
+colnames(colData)[1] <- "uniqueID"
+colnames(myMat) <- colData[ ,"uniqueID"]
+
+setwd("~/__Data/shelfLifeSLE/outs")
+save(myMat, file="shelfLifeSLE_myMat.RData")
+save(colData, file="shelfLifeSLE_colData.RData")
+
+# Initialize the Seurat object 
+pbmc <- CreateSeuratObject(counts = myMat, project = "pbmcAging", min.cells = 3, min.features = 200)
+rm(myMat)
 gc()
 
 ```
+
 
 ```{r}
 # Examine a few genes in the first thirty cells
@@ -140,6 +170,11 @@ Counts -> Z-scores for PCA, etc.
 However, `sctransform` is the new recommended method and comes with a `vars.to.regress` parameter.
 
 ```{r scaling and normalization, results='hide'}
+# Save pbmc. Switch to high-memory instance!
+setwd("~/__Data/shelfLifeSLE/outs")
+# save(pbmc, file="Seurat.pbmc.pre.scTransform_shelfLifeSLE.RData")
+pbmc <- get(load("Seurat.pbmc.pre.scTransform_shelfLifeSLE.RData"))
+
 gc()
 pbmc <- SCTransform(object = pbmc, verbose = FALSE, vars.to.regress = 'percent.mt', conserve.memory = TRUE)
 # Transformed data will be available in the SCT assay, 
@@ -147,10 +182,10 @@ pbmc <- SCTransform(object = pbmc, verbose = FALSE, vars.to.regress = 'percent.m
 
 # names(pbmc) #  "RNA" "SCT" 
 normalizedPBMC <- GetAssayData(object = pbmc, assay="SCT", slot = "data")
-setwd("~/__Data")
+setwd("~/__Data/shelfLifeSLE/")
 # getwd()
-save(normalizedPBMC, file="SeuratNormalizedCounts_GRCh38_filteredMT.RData")
-save(pbmc, file="seuratObj_pbmc_shelfLifeHD.RData")
+save(normalizedPBMC, file="SeuratNormalizedCountsSLE_GRCh38_filteredMT.RData")
+save(pbmc, file="seuratObj_pbmc_shelfLifeSLE.RData")
 # nonZeros <- as.matrix(normalizedPBMC); nonZeros <- nonZeros[(nonZeros > 0)]
 # hist(nonZeros, breaks=10) # nothing above ~5.5, most values between 1 and 2.
 ```
@@ -162,22 +197,31 @@ library("Matrix")
 library(dplyr)
 library(Seurat)
 
-setwd("~/__Data")
-normalizedPBMC <- get(load("SeuratNormalizedCounts_GRCh38_filteredMT.RData"))
+setwd("~/__Data/shelfLifeSLE/outs")
+# myMat <- get(load("shelfLifeSLE_myMat.RData"))
+colData <- get(load("shelfLifeSLE_colData.RData"))
+
+setwd("~/__Data/shelfLifeSLE")
+normalizedPBMC <- get(load("SeuratNormalizedCountsSLE_GRCh38_filteredMT.RData"))
 PBMC.IDs <- unlist(lapply(strsplit(colnames(normalizedPBMC), "-"), function(x) x[1]))
  
-setwd("~/__Data")
+setwd("/home/hamid.bolouri/__Data/shelfLifeSLE/outs/analysis/clustering/kmeans_10_clusters/")
 CLs <- read.csv("clusters.csv", as.is=TRUE)
 clusterIDs <- unlist(lapply(strsplit(CLs$Barcode, "-"), function(x) x[1]))
 CLs <- CLs[match(PBMC.IDs, clusterIDs), ]
 CLs$Barcode <- colnames(normalizedPBMC)
+
+# setwd("~/__Data/shelfLifeSLE/outs")
+# write.csv(CLs, file="shelfLife_SLE_LoupeK10Clusters.csv")
+# save(CLs, file="helfLife_SLE_LoupeK10Clusters.RData")
+
 colnames(CLs) <- c("ID", "group")
 CLs$group<- as.factor(CLs$group)
 library(S4Vectors)
 CLs <- DataFrame(CLs)
 
-IDs = c("BRISL2", "BRISL3", "BRISL4")
-HRs = c("2h", "4h", "6h", "8h", "18h")
+IDs = c("BRISL5", "BRISL6", "BRISL7")
+HRs = c("-2hr", "-4hr", "-6hr", "-8hr", "-18hr")
 
 ```
 
@@ -186,12 +230,13 @@ HRs = c("2h", "4h", "6h", "8h", "18h")
 ```{r differentialExpression}
 setwd("~/__Data"); 
 
-#### Look for genes DE across timepoints
+#### Look for genes DE across timepoints  
+#### See bottom of this section for Adam version 
 runDE <- function(time1, time2) {
   
    testDE <- function(x) {
-     x1 <- x[grep(paste0("-", time1, "h$"), names(x))]
-     x2 <- x[grep(paste0("-", time2, "h$"), names(x))]
+     x1 <- x[grep(paste0("-", time1, "hr$"), names(x))]
+     x2 <- x[grep(paste0("-", time2, "hr$"), names(x))]
      x1 <- x1[x1 > 0]
      x2 <- x2[x2 > 0]
      # Consider only clutsers with > 100 cells
@@ -216,7 +261,7 @@ runDE <- function(time1, time2) {
        res1 <- unlist(future_apply(clTbl[i1:i2, ], 1, FUN = testDE))
        res1 <- res1[res1 < 0.01 & !is.na(res1)]
        res <- c(res, res1)
-       # print(i1)
+       print(i1)
      }
      
      remaining <- (i2+1):(dim(clTbl)[1])
@@ -240,27 +285,29 @@ runDE <- function(time1, time2) {
    return(res.adj)
 }
 
-T1 = 2; T2 = 8
-res.adj <- runDE(time1=T1, time2=T2)
-setwd("~/__Data")
-save(res.adj, file=paste0("shelfLife_HD_DE", T1, "to", T2, "hr_pVals_adjFDR_v2.RData"))
-library(erer)
-setwd("~/__Data")
-write.list(z=res.adj, 
-           file=paste0("shelfLife_HD_DE", T1, "to", T2, "hr_pVals_adjFDR_v2.CSV"), 
-           row.names=TRUE)
+T1 = 2
+for (T2 in c(4, 6, 8)) {
+  print(Sys.time())
+  res.adj <- runDE(time1=T1, time2=T2)
+  setwd("~/__Data/shelfLifeSLE")
+  save(res.adj, file=paste0("shelfLifeSLE_DE", T1, "to", T2, "hr_pVals_adjFDR_v2.RData"))
+  library(erer)
+  setwd("~/__Data/shelfLifeSLE")
+  write.list(z=res.adj, 
+             file=paste0("shelfLifeSLE_DE", T1, "to", T2, "hr_pVals_adjFDR_v2.CSV"), 
+             row.names=TRUE)
+}
 
-
-setwd("~/__Data")
-DE2.4 <- get(load("shelfLife_HD_DE2to4hr_pVals_adjFDR_v2.RData"))
-DE2.6 <- get(load("shelfLife_HD_DE2to6hr_pVals_adjFDR_v2.RData"))
-DE2.8 <- get(load("shelfLife_HD_DE2to8hr_pVals_adjFDR_v2.RData"))
+setwd("~/__Data/shelfLifeSLE")
+DE2.4 <- get(load("shelfLifeSLE_DE2to4hr_pVals_adjFDR_v2.RData"))
+DE2.6 <- get(load("shelfLifeSLE_DE2to6hr_pVals_adjFDR_v2.RData"))
+DE2.8 <- get(load("shelfLifeSLE_DE2to8hr_pVals_adjFDR_v2.RData"))
 
 # library("VennDiagram")
 library("eulerr")
 
 setwd("~/__Plots")
-pdf("shelfLife_DE2.4.6.8_Venns.pdf")
+pdf("shelfLifeSLE_DE2.4.6.8_Venns.pdf")
 par(mfrow = c(2, 3))
 for (i in names(DE2.4)) {
   genes2.4 <- names(DE2.4[[i]][which(DE2.4[[i]] < 0.01)])
@@ -280,22 +327,263 @@ for (i in names(DE2.4)) {
   shared[[i]] <- intersect(intersect(genes2.4, genes2.6), genes2.8)
 }
 
+setwd("~/__Data/shelfLifeSLE")
+save(shared, file="shelfLifeSLE_sharedGenesPerClusterDE2.4.6.8.RData")
+
+setwd("~/__Data/shelfLifeSLE")
+sharedSLE <- get(load("shelfLifeSLE_sharedGenesPerClusterDE2.4.6.8.RData"))
+setwd("~/__Data")
+sharedHD <- get(load("sharedGenesPerClusterDE2.4.6.8.RData"))
+
+allDE <- intersect(unlist(sharedHD), unlist(sharedSLE))
+sharedInCluster.HD.SLE <- lapply(sharedHD, function(x) intersect(x, allDE))
+names(sharedInCluster.HD.SLE) <- paste0(names(sharedInCluster.HD.SLE), ":",
+                                        c("Tnaive", "Mono", "Tact", "NK/Tgd", "B","pDC"))
+sum(unlist(lapply(sharedInCluster.HD.SLE, length))) # 234
+save(sharedInCluster.HD.SLE, file="~/__Data/shelfLifeSLE/sharedInCluster.HD.SLE_234Genes5CellTypes.RData")
+
 setwd("~/__Data/")
 save(shared, file="sharedGenesPerClusterDE2.4.6.8.RData")
 
-library(pheatmap)
-setwd("~/__Data")
-avExpList <- get(load("avExpList.RData"))
-M <- avExpList[["BRISL4:C6"]]
-M <- M[intersect(shared[["cluster6"]], rownames(M)), ]
+setwd("~/__Data/shelfLifeSLE")
+avExpList <- get(load("shelfLifeSLE_avExpList.RData"))
+
+shared <- get(load("~/__Data/shelfLifeSLE/sharedInCluster.HD.SLE_234Genes5CellTypes.RData"))
+
+M <- avExpList[["BRISL6:C4"]]
+M <- M[intersect(shared[["cluster6:B"]], rownames(M)), ]
+M <- M[apply(M, 1, sd) > 0, ]
+
 setwd("~/__Plots")
-pdf("shelfLife_HD.BRISL4_DE2.4.6.8.18_cluster6Markers_heatmap.pdf")
+pdf("shelfLife_SLE.BRISL6_DE2.4.6.8.18_cluster6Markers_heatmap.pdf")
+library(pheatmap)
 pheatmap(M, scale="row", cluster_cols=FALSE)
 dev.off()
 
+setwd("~/__Data")
+targetsIFN <- read.csv("IFNtargets.csv", header=TRUE, as.is=TRUE)$Name
+  
+sort(intersect(unlist(shared), targetsIFN))
+# "CCR1"    "DYNLT1"  "GCA"     "HSPA1A"  "JUN"     "MNDA"    "NAGK"    "SLFN5"   "TNFSF10"
+
+
+##################################################################################################
+####         per Adam's 27Sept2019 request for expression values as well as p-vals            ####
+##################################################################################################
+
+runDE2 <- function(time1, time2) {
+  
+   testDE2 <- function(x) {
+     x1 <- x[grep(paste0("-", time1, "hr$"), names(x))]
+     x2 <- x[grep(paste0("-", time2, "hr$"), names(x))]
+     x1 <- x1[x1 > 0]
+     x2 <- x2[x2 > 0]
+     # Consider only clutsers with > 100 cells
+     if (length(x1) > 100 & length(x2)>100) {
+       pW <- wilcox.test(x1, x2)$p.value
+       resTuplet <- c(T1=time1, T2=time2, medianT1=median(x1), medianT2=median(x2), 
+                      meanT1=mean(x1), meanT2=mean(x2), maxT1=max(x1), maxT2=max(T2), P=pW)
+       return(resTuplet)
+     } else return(NULL)
+   }
+
+   clusterNos = 1:10
+   res = NULL; N = 0
+   resList = resLabels = list()
+   Sys.time()
+   for (cl in clusterNos) {
+     i.CL <- grep(cl, CLs$group)
+     clTbl <- normalizedPBMC[ , i.CL]
+   
+     stepSize = 1000
+     M <- dim(clTbl)[1] - stepSize
+     i1 = i2 = 0; res = NULL
+     while (i2 < M) {
+       i1 <- i2 + 1; i2 <- i2 + stepSize
+       iTbl <- clTbl[i1:i2, ]
+       res1 <- future_apply(iTbl, 1, FUN = testDE2)
+       res1 <- do.call(rbind, res1)
+       iCheck <- res1[ ,"P"] < 0.01 & !is.na(res1[ , "P"])
+       if (length(iCheck) > 0) {
+         res1 <- res1[iCheck, ]
+         res <- rbind(res, res1)
+       }
+       print(i1)
+     }
+     
+     remaining <- (i2+1):(dim(clTbl)[1])
+     iTbl <- clTbl[remaining, ]
+     genes <- rownames(iTbl)
+     res2 <- future_apply(iTbl, 1, FUN = testDE2)
+     res2 <- do.call(rbind, res2)
+     iCheck <- res2[ ,"P"] < 0.01 & !is.na(res2[ , "P"])
+     if (length(iCheck) > 0) {
+       res2 <- res2[res2[ ,"P"] < 0.01 & !is.na(res2[ , "P"]), ]
+       res <- c(res, res2)
+     }
+     if (!is.null(res)) {
+        N <- N +1
+        resList[[N]] <- res
+        resLabels[[N]] <- paste0("cluster", cl)
+        print(paste0("cluster ", cl, "  time:", Sys.time()))
+     }
+   }
+   
+   # res.adj <- lapply(resList, function(x) p.adjust(x, method="fdr")) 
+   # NB. Previous method above only corrected for number of tests KEPT!
+   res.adj <- lapply(resList, function(x) {
+              x[ , "P"] <- x[ , "P"] * nrow(clTbl)
+              return(x)
+              })
+   res.adj <- lapply(res.adj, function(x) {
+                    x <- x[x[ ,"P"] < 0.05, ]
+                    return(x)
+              })
+   res.adj <- lapply(res.adj, function(x) {
+                    x <- x[order(x[ ,"P"]), ]
+              })
+   return(res.adj)
+}
+
+T1 = 2
+for (T2 in c(4, 6, 8)) {
+  print(Sys.time())
+  res.adj <- runDE2(time1=T1, time2=T2)
+  setwd("~/__Data/shelfLifeSLE")
+  saveRDS(res.adj, file=paste0("shelfLifeSLE_DE", T1, "to", T2, "hr_adjFDR_details.CSV"))
+  write.list(z=res.adj, 
+             file=paste0("shelfLifeSLE_DE", T1, "to", T2, "hr_pVals_adjFDR_details.CSV"), 
+             row.names=TRUE)
+}
+
+
 ```
 
-## 
+## Cell labeling
+
+```{r labelCells}
+
+library("tidyverse")
+library("Matrix")
+
+setwd("~/__Data")
+timePoints <- HRs
+
+library("Seurat")
+pbmcTmp <- CreateSeuratObject(counts=normalizedPBMC, project="shelfLife", min.cells=3, 
+                           min.features=200, meta.data=CLs)
+Idents(pbmcTmp) <- paste0("C", CLs$group) # use cellRanger clusters
+
+AdamLabels <- c(C1="C1:T cells, maybe naïve", C2="C2:Monocytes", 
+                C3="C3:NK/gdT/activated T cells", C4="C4:B cells", 
+                C5="C5:Myeloid ?", C6="C6:DC/mac?", C7="C7:Hemoglobin+", 
+                C8="C8:Ly6G+ PMN?", C9="C9:Ubiquitin+ Topoisomerase+ junk?", 
+                C10="C10:pDC")
+
+library(SingleCellExperiment)
+pbmc.sce <- as.SingleCellExperiment(pbmcTmp)
+indx <- match(colData(pbmc.sce)$ident, names(AdamLabels))
+colData(pbmc.sce)$ident <- AdamLabels[indx]
+
+rm(pbmcTmp)
+gc()
+
+setwd("~/__Data/signatures")
+LM22 <- read.delim("CIBERSORT_LM22.txt", header=TRUE, row.names=1, as.is=TRUE) 
+GSE107011 <- read.csv("PBMC_17of_29CellTypesRNAseqSignatures.csv", 
+                      header=TRUE, row.names=1, as.is=TRUE) 
+pmid30413720 <- read.csv('immunoStates_320Genes20CellTypes_signature.csv',
+                         skip=2, header=TRUE, row.names=1, as.is=TRUE) # 20 cell types
+
+library(Hmisc)
+library(lsa)
+
+# classSig: Set to one of: # LM22 # GSE107011 # pmid30413720
+
+calcSigs <- function(classSig) {
+  typesTbl = corrsTbl = list()
+  for (i in 1:length(AdamLabels)) {
+    iClust <- names(AdamLabels)[i]
+    j <- which(colData(pbmc.sce)$ident == iClust)
+    sharedGenes <- intersect(rownames(pbmc.sce), rownames(classSig))
+  
+    selExp <- as.matrix((counts(pbmc.sce))[sharedGenes, j])
+    selSig <- as.matrix(classSig[sharedGenes, ])
+    corrList <- future_apply(selExp, 2, FUN=function(y) rcorr(y, selSig))
+    
+    rList <- lapply(corrList, function(x) x$r)
+    bestMatch <- unlist(lapply(rList, function(x) {
+                      x[lower.tri(x, diag=TRUE)] <- NA
+                      x <- x[1, -1]
+                      return(names(which(x == max(x, na.rm=TRUE))))
+                      }))
+  
+    bestCorr <- unlist(lapply(rList, function(x) {
+                      x[lower.tri(x, diag=TRUE)] <- NA
+                      x <- x[1, -1]
+                      return( x[which(x == max(x, na.rm=TRUE))] )
+                      }))
+  
+    matchTbl <- rev(sort(table(bestMatch)))
+    typesTbl[[i]] <- matchTbl/sum(matchTbl)
+    
+    corrVals = NULL
+    for (iCorr in 1:length(matchTbl)) {
+      corrVals <- c(corrVals, median(bestCorr[grep(names(matchTbl)[iCorr], names(bestCorr))]))
+    }
+    corrsTbl[[i]] <- corrVals
+  }
+  names(typesTbl) <- AdamLabels
+  names(corrsTbl) <- AdamLabels
+  
+  sigsList = list()
+  for (A in 1:length(AdamLabels)) {
+    DF <- data.frame("cell type"=typesTbl[[A]], "correlation to signature"=corrsTbl[[A]])
+    sigsList[[A]] <- DF
+  }
+  return(sigsList)
+}
+
+allSigs = list(); loopCount = 0
+mySigs <- list(LM22, GSE107011, pmid30413720)
+for (signature in mySigs) {
+  loopCount <- loopCount + 1
+  print(paste0(Sys.time(), "    ", loopCount))
+  allSigs[[loopCount]] <- calcSigs(classSig = signature)
+}
+names(allSigs) <- c("LM22", "GSE107011", "pmid30413720")
+
+setwd("~/__Data/shelfLifeSLE")
+save(allSigs, file="shelfLifeSLE_predictedCellTypes_fracCells_all3Sigs.RData")
+# save(typesTbl, file="predictedCellTypes_fracCells_LM22.RData")
+# save(corrsTbl, file="predictedCellTypes_medCorrs_LM22.RData")
+
+
+library(ggrepel)
+setwd("~/__Plots")
+pdf("shelfLifeSLE_cellTypes2DPlot_allSigs.pdf", height=12, width=12)
+for (indx in 1:length(AdamLabels)) {
+    DF1 <- allSigs[[1]][[indx]]
+    DF2 <- allSigs[[2]][[indx]]
+    DF3 <- allSigs[[3]][[indx]]
+    colnames(DF1)[2] = colnames(DF2)[2] = colnames(DF3)[2] = "fraction.of.cells"
+    DF1$sig <- names(allSigs)[1]
+    DF2$sig <- names(allSigs)[2]
+    DF3$sig <- names(allSigs)[3]
+    DF <- rbind(DF1, DF2, DF3)
+    
+    print(ggplot(DF, aes(fraction.of.cells, correlation.to.signature, label = cell.type.bestMatch, color=sig)) +
+    geom_text_repel() +
+    geom_point() +
+    ggtitle(AdamLabels[indx]) +
+    theme_classic(base_size = 16))
+}
+dev.off()
+
+
+```
+
+## Median expression per cluster for mFuzz
 
 ```{r avExpPerDonorPerTimepoint}
 clusterNos = 1:10
@@ -306,7 +594,7 @@ for (i in IDs) {
   print(i)
   i.ID <- grep(i, colnames(normalizedPBMC))
   for (cl in clusterNos) {
-     i.CL <- grep(cl, CLs$Cluster)
+     i.CL <- grep(cl, CLs$group)
      resMtrx = colID = NULL
      for (h in HRs) {
           i.HR <- grep(h, colnames(normalizedPBMC))
@@ -332,8 +620,8 @@ for (i in 1:length(selGenes)) {
   avExpList[[i]] <- avExpList[[i]][selGenes[[i]], ]
 }
 
-setwd("~/__Data")
-save(avExpList, file="avExpList_HD_noFilter.RData")
+setwd("~/__Data/shelfLifeSLE")
+save(avExpList, file="shelfLifeSLE_avExpList_noFilter.RData")
 ```
 
 ## Expression correlation
@@ -350,8 +638,8 @@ library(Hmisc)
 corrList <- get(load("corrList.RData"))
 
 library(corrplot)
-setwd("~/__Data"); getwd()
-pdf("shelfLifeCorrPlots.pdf")
+setwd("~/__Data/shelfLifeSLE"); getwd()
+pdf("shelfLifeSLE_CorrPlots.pdf")
 for (i in 1:length(corrList)) {
     x <- corrList[[i]]
     if (length(x) > 0) {
@@ -387,7 +675,7 @@ selGenes <- names(which(corrList[[3]]$P["CDC42", ] == 0))
 mtrx <- avExpList[[names(corrList)[3]]][selGenes, ]
 mtrx <- t(apply(mtrx, 1, scale))
 colnames(mtrx) <- colnames(avExpList[[names(corrList)[3]]])
-setwd("~/__Data"); getwd()
+setwd("~/__Data/shelfLifeSLE"); getwd()
 pdf("BRISL2.LoupeC3.corrCDC42.heatmap.pdf")
 pheatmap(mtrx, cluster_cols=FALSE)
 dev.off()
@@ -455,12 +743,12 @@ dev.off()
 
 ```{r mFuzzCLustering}
 
-setwd("~/__Data")
-avExpList <- get(load("avExpList.RData"))
+setwd("~/__Data/shelfLifeSLE")
+avExpList <- get(load("shelfLifeSLE_avExpList.RData"))
 
 library(Mfuzz)
-setwd("~/__Data")
-pdf('mfuzzClusters.pdf')
+setwd("~/__Data/shelfLifeSLE")
+pdf('shelfLifeSLE_mfuzzClusters.pdf')
 allClusters = list()
 for (i in 1:length(avExpList)) {
   eset <- ExpressionSet(avExpList[[i]])
@@ -472,22 +760,26 @@ for (i in 1:length(avExpList)) {
   shortName <- gsub("BRISL|C", "", names(avExpList)[i])
   tLabels <- paste0(shortName, ":", 
                     c("2", "4", "6", "8", "18")[1:ncol(avExpList[[i]])])
-  # mfuzz.plot(eset, cl=cl, mfrow=c(2, 2), new.window=FALSE,
-  # 		   time.labels=tLabels,
-  # 		   min.mem=0.5) 
+  mfuzz.plot(eset, cl=cl, mfrow=c(2, 2), new.window=FALSE,
+  		   time.labels=tLabels,
+  		   min.mem=0.5)
 }
 dev.off()
 names(allClusters) <- names(avExpList)
-setwd("~/__Data")
-# save(allClusters, file="all.mFuzz.clusters.RData")
-allClusters <- get(load("all.mFuzz.clusters.RData"))
+
+setwd("~/__Data/shelfLifeSLE")
+save(allClusters, file="shelfLifeSLE_all.mFuzz.clusters.RData")
+# allClusters <- get(load("shelfLifeSLE_all.mFuzz.clusters.RData"))
+
+
+
 
 selCL <- allClusters[[1]][[3]]
 selGenes <- names(selCL[selCL == 4])
 
 X <- avExpList[[names(allClusters)]][selGenes, ]
 maxY <- max(X)
-setwd("~/__Data")
+setwd("~/__Data/shelfLifeSLE")
 pdf("BRISL2.LoupeC1.mFuzzCluster4_timeCourse.pdf")
 plot(c(1,5), c(0,maxY), col=rgb(1,1,1,0), xaxt="n", 
      xlab="timepoint", ylab="Normalized log2 expression")
@@ -557,6 +849,75 @@ for (g in genes.pDC) {
 }
 dev.off()
 
+# Plot NFKBIA time course in B cells:
+setwd("/home/hamid.bolouri/__Data/shelfLifeSLE/outs/analysis/clustering/kmeans_10_clusters/")
+CLs <- read.csv("clusters.csv", as.is=TRUE)
+clusterIDs <- unlist(lapply(strsplit(CLs$Barcode, "-"), function(x) x[1]))
+CLs <- CLs[match(PBMC.IDs, clusterIDs), ]
+CLs$Barcode <- colnames(normalizedPBMC)
+
+clustB <- CLs$Barcode[CLs$Cluster == 4]
+iClustB <- match(clustB, colnames(normalizedPBMC))
+iB2Hr <- intersect(grep("-2hr", colnames(normalizedPBMC)), iClustB)
+iB4Hr <- intersect(grep("-4hr", colnames(normalizedPBMC)), iClustB)
+iB6Hr <- intersect(grep("-6hr", colnames(normalizedPBMC)), iClustB)
+iB8Hr <- intersect(grep("-8hr", colnames(normalizedPBMC)), iClustB)
+
+hr2 <- normalizedPBMC["NFKBIA", iB2Hr]
+hr4 <- normalizedPBMC["NFKBIA", iB4Hr]
+hr6 <- normalizedPBMC["NFKBIA", iB6Hr]
+hr8 <- normalizedPBMC["NFKBIA", iB8Hr]
+
+DF <- data.frame(Time=c(rep("2Hr", length(iB2Hr)), rep("4Hr", length(iB4Hr)), 
+                        rep("6Hr", length(iB6Hr)), rep("8Hr", length(iB8Hr))),
+                 log2_NFKBIA=c(hr2, hr4, hr6, hr8))
+library(ggplot2)
+setwd("~/__Data/shelfLifeSLE")
+pdf("SLE_LoupeCluster4Bcells.Violin2.4.6.8_NFKBIA.pdf")
+ggplot(DF, aes(x=Time, y=log2_NFKBIA)) + 
+  geom_violin(fill=rgb(0,0.5,1,0.15)) +
+  geom_boxplot(width=0.1, color="darkred") +
+  stat_summary(fun.y=median, geom="point", size=2, color="red")
+dev.off()
+
+
+###################### FHIT exploration for Miriam ########################
+setwd("/home/hamid.bolouri/__Data/shelfLifeSLE/outs/analysis/clustering/kmeans_10_clusters/")
+CLs <- read.csv("clusters.csv", as.is=TRUE)
+clusterIDs <- unlist(lapply(strsplit(CLs$Barcode, "-"), function(x) x[1]))
+CLs <- CLs[match(PBMC.IDs, clusterIDs), ]
+CLs$Barcode <- colnames(normalizedPBMC)
+
+library(ggplot2)
+setwd("~/__Data/shelfLifeSLE")
+pdf("SLE_perCluster.Violin2.4.6.8.18_FHIT.pdf")
+for (i in 1:10) {
+  clustB <- CLs$Barcode[CLs$Cluster == i]
+  iClustB <- match(clustB, colnames(normalizedPBMC))
+  iB2Hr <- intersect(grep("-2hr", colnames(normalizedPBMC)), iClustB)
+  iB4Hr <- intersect(grep("-4hr", colnames(normalizedPBMC)), iClustB)
+  iB6Hr <- intersect(grep("-6hr", colnames(normalizedPBMC)), iClustB)
+  iB8Hr <- intersect(grep("-8hr", colnames(normalizedPBMC)), iClustB)
+  iB18Hr <- intersect(grep("-18hr", colnames(normalizedPBMC)), iClustB)
+  
+  hr2 <- normalizedPBMC["FHIT", iB2Hr]
+  hr4 <- normalizedPBMC["FHIT", iB4Hr]
+  hr6 <- normalizedPBMC["FHIT", iB6Hr]
+  hr8 <- normalizedPBMC["FHIT", iB8Hr]
+  hr18 <- normalizedPBMC["FHIT", iB18Hr]
+  
+  DF <- data.frame(Time=c(rep("2Hr", length(iB2Hr)), rep("4Hr", length(iB4Hr)),
+                          rep("6Hr", length(iB6Hr)), rep("8Hr", length(iB8Hr)), 
+                          rep("Hr18", length(iB18Hr)) ),
+                   log2_FHIT=c(hr2, hr4, hr6, hr8, hr18))
+  
+  print(ggplot(DF, aes(x=Time, y=log2_FHIT)) +
+    geom_violin(fill=rgb(0,0.5,1,0.15)) +
+    geom_boxplot(width=0.1, color="darkred") +
+    stat_summary(fun.y=median, geom="point", size=2, color="red"))
+}
+dev.off()
+
 ```
 
 ## HB: marker gene enrichment analysis 
@@ -566,11 +927,9 @@ library(clusterProfiler)
 library(gage)
 library(pathview)
 
-setwd("~/__Data")
-DE.2.4.old <- get(load("DE2to4hr_pVals_adjFDR.RData"))
-DE.2.4 <- get(load("shelfLife_HD_DE2to4hr_pVals_adjFDR_v2.RData"))
-markersListOld <- lapply(DE.2.4.old, function(x) names(x))
-markersList <- lapply(DE.2.4, function(x) names(x)) # same except no cluster 10
+setwd("~/__Data/shelfLifeSLE")
+DE.2.4 <- get(load("shelfLifeSLE_DE2to4hr_pVals_adjFDR_v2.RData"))
+markersList <- lapply(DE.2.4, function(x) names(x)) 
 
 keggPathways = NULL
 for (i in 1:length(markersList)) {
@@ -588,9 +947,9 @@ for (i in 1:length(markersList)) {
   }
   print(i)
 }
-setwd("~/__Data")
-save(keggPathways, file="keggPathways_shelfLifeHD_DE2to4.RData")
-write.csv(keggPathways, file="keggPathways_shelfLifeHD_DE2to4.CSV")
+setwd("~/__Data/shelfLifeSLE")
+save(keggPathways, file="shelfLifeSLE_keggPathways_shelfLifeHD_DE2to4.RData")
+write.csv(keggPathways, file="shelfLifeSLE_keggPathways_shelfLifeHD_DE2to4.CSV")
 ```
 
 
@@ -598,7 +957,9 @@ write.csv(keggPathways, file="keggPathways_shelfLifeHD_DE2to4.CSV")
 ## Seurat general analyses
 
 ```{r pca,results='hide'}
-# pbmc <- RunPCA(object = pbmc, features = VariableFeatures(object = pbmc))
+setwd("~/__Data/shelfLifeSLE/")
+pbmc <- get(load("seuratObj_pbmc_shelfLifeSLE.RData"))
+pbmc <- RunPCA(object = pbmc, features = VariableFeatures(object = pbmc))
 # names(pbmc) #  "RNA" "SCT" "pca"
 # pbmc[['pca']]@feature.loadings[1:5,1:5] 
 ```
@@ -614,7 +975,7 @@ write.csv(keggPathways, file="keggPathways_shelfLifeHD_DE2to4.CSV")
 # `cells` = 'a number' plots the 'extreme' cells on both ends of the spectrum, 
 # which dramatically speeds plotting for large datasets. 
 
-# DimHeatmap(object = pbmc, dims = 1:15, cells = 500, balanced = TRUE)
+DimHeatmap(object = pbmc, dims = 1:15, cells = 500, balanced = TRUE)
 ```
 
 ### Determine the 'dimensionality' of the dataset
@@ -628,10 +989,8 @@ write.csv(keggPathways, file="keggPathways_shelfLifeHD_DE2to4.CSV")
 Use elbow plot instead:
 
 ```{r elbow_plot}
-# ElbowPlot(object = pbmc)
-# choose 10 here, but :
-# genes strongly associated with PCs 12 and 13 define rare DC and NK subsets 
-
+ElbowPlot(object = pbmc)
+# choose 17 
 ```
 
 
@@ -647,14 +1006,18 @@ The clusters can be found using the `Idents` function.
 
 
 ```{r cluster}
-# pbmc <- FindNeighbors(object = pbmc, dims = 1:10)
-# pbmc <- FindClusters(object = pbmc, resolution = 0.5)
+pbmc <- FindNeighbors(object = pbmc, dims = 1:17)
+# resolution == 0.5 & PCs = 17 -> 39 clusters; PCs = 10 -> 33 clusters
+# resolution == 0.25, PCs =  17 -> 28 clusters
+# resolution == 0.1,  PCs =  17 -> 18 clusters
+pbmc <- FindClusters(object = pbmc, resolution = 0.1)
 
 # Assigned cluster numbers:     
-# clusterIDs <- Idents(object = pbmc)
-# table(clusterIDs) # Note: getting a 14-cell tenth cluster!
-#   0   1   2   3   4   5   6   7   8   9 
-# 654 443 365 347 273 206 157 146  33  14 
+clusterIDs <- Idents(object = pbmc)
+length(table(clusterIDs))
+
+save(clusterIDs, file="~/__Data/shelfLifeSLE/shelfLifeSLE_clusterIDs18.RData")
+
 ```
 
 ### Run non-linear dimensional reduction (UMAP/tSNE)
@@ -663,13 +1026,46 @@ Use the same PCs as input to the clustering analysis.
 
 ```{r tsne}
 # Install UMAP, via pip or reticulate::py_install(packages = "umap-learn")
-# pbmc <- RunUMAP(object = pbmc, dims = 1:10)
+
+# saveRDS(pbmc, "~/__Data/shelfLifeSLE/shelfLifeSLE_pbmc_SeuratObj_with18Clusters.rds")
+pbmc <- readRDS("~/__Data/shelfLifeSLE/shelfLifeSLE_pbmc_SeuratObj_with18Clusters.rds")
+
+pbmc <- RunUMAP(object = pbmc, dims = 1:17)
 # Coords of UMMAP plot are in     pbmc[['umap']]@cell.embeddings
 
 # Set `label = TRUE` or use the LabelClusters function for labeling
-# DimPlot(object = pbmc, reduction = 'umap', label = TRUE)
+pdf("~/__Plots/shelfLifeSLE_UMAP.17PCs.18Clusters.pdf")
+DimPlot(object = pbmc, reduction = 'umap', label = TRUE)
+dev.off()
 
-# saveRDS(pbmc, file = "~/Desktop/filtered_gene_bc_matrices/pbmc_tutorial.rds")
+saveRDS(pbmc, file = 
+        "~/__Data/shelfLifeSLE/shelfLifeSLE_pbmc_SeuratObj_18ClustersUMAP.rds")
+umapCoords <- pbmc[['umap']]@cell.embeddings
+save(umapCoords, 
+     file="~/__Data/shelfLifeSLE/shelfLifeSLE_18ClusterUMAP.coords.RData")
+
+
+plotCoords <- as.data.frame(umapCoords)
+plotCoords$time <- "white"
+plotCoords$time[grep("-2hr", rownames(plotCoords))] <- "2hr"
+plotCoords$time[grep("-4hr", rownames(plotCoords))] <- "4hr" 
+plotCoords$time[grep("-6hr", rownames(plotCoords))] <- "6hr" 
+plotCoords$time[grep("-8hr", rownames(plotCoords))] <- "8hr" 
+plotCoords$time[grep("-18hr", rownames(plotCoords))] <- "18hr"
+plotCoords$time <- factor(plotCoords$time, levels=c("2hr", "4hr", "6hr", "8hr", "18hr"),
+                          labels=c("2hr", "4hr", "6hr", "8hr", "18hr"))
+
+myColors <- c("2hr"="blue", "4hr"="cyan", "6hr"="gold", "8hr"="magenta", "18hr"="orangered2")
+library(ggplot2)
+setwd("~/__Plots")
+pdf("shelfLifeSLE_UMAP_18Clusters_byTimePoint.pdf")
+ggplot(data=plotCoords, mapping = aes(x=UMAP_1, y=UMAP_2, color=time)) +
+  geom_point(alpha=0.1) +
+  scale_fill_manual(values = myColors, aesthetics = c("colour", "fill")) +
+  theme(legend.key = element_rect(fill="white", color="white")) +
+  guides(colour = guide_legend(override.aes = list(alpha = 1))) 
+dev.off()
+
 ```
 
 ### Finding differentially expressed features per cluster

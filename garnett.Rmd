@@ -1,0 +1,104 @@
+---
+title: "Garnett.Rmd"
+author: "HB"
+date: "8/14/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 120),
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+### Allocate memory  and use all CPUs
+
+```{r config}
+library(future)
+plan(strategy = "multiprocess", workers = 8)    ############## set number of CPUs #################
+options(future.globals.maxSize = 20 * 1024 ^ 3)
+
+library("future.apply")
+library("stats")
+```
+
+
+```{r do}
+
+# Get Seurat labeled PBMC object from here:
+# https://satijalab.org/signac/articles/pbmc_vignette.html
+# https://github.com/satijalab/Integration2019/blob/master/preprocessing_scripts/pbmc_10k_v3.R
+# https://www.dropbox.com/s/zn6khirjafoyyxl/pbmc_10k_v3.rds?dl=0
+library(monocle3)
+setwd("~/__Data/Garnett/")
+seurat_object <- readRDS("pbmc_10k_v3.rds")
+
+M <- as(as.matrix(seurat_object@assays$RNA@data), 'sparseMatrix')
+metaDF <- seurat_object@meta.data
+metaDF$celltype[grep("CD14+", metaDF$celltype)] <- "Monocyte"
+metaDF$celltype[grep("Dendritic", metaDF$celltype)] <- "DC"
+metaDF$celltype[grep("bright", metaDF$celltype)] <- "NK56 bright"
+metaDF$celltype[grep("dim", metaDF$celltype)] <- "NK56 dim"
+metaDF$celltype[grep("preB", metaDF$celltype)] <- "Immature B"
+metaDF$celltype[grep("effector", metaDF$celltype)] <- "Activated CD8"
+
+
+pd <- new('AnnotatedDataFrame', data = metaDF)
+fData <- data.frame(gene_short_name = row.names(data), row.names = row.names(data))
+fd <- new('AnnotatedDataFrame', data = fData)
+#Construct monocle cds
+monocle_cds <- newCellDataSet(M,
+                         phenoData = pd,
+                         featureData = fd,
+                         lowerDetectionLimit = 0.5,
+                         expressionFamily = negbinomial.size())
+
+
+library(garnett)
+# 
+# mat <- readMM(system.file("extdata", "exprs_sparse.mtx", package = "garnett"))
+# fdata <- read.table(system.file("extdata", "fdata.txt", package = "garnett"))
+# pdata <- read.table(system.file("extdata", "pdata.txt", package = "garnett"),
+#                     sep="\t")
+# row.names(mat) <- row.names(fdata)
+# colnames(mat) <- row.names(pdata)
+# 
+# # create a new CDS object
+# pd <- new("AnnotatedDataFrame", data = pdata)
+# fd <- new("AnnotatedDataFrame", data = fdata)
+# pbmc_cds <- newCellDataSet(as(mat, "dgCMatrix"),
+#                              phenoData = pd,
+#                              featureData = fd)
+
+#### generate size factors for normalization later
+monocle_cds <- estimateSizeFactors(monocle_cds)
+
+
+library(org.Hs.eg.db)
+marker_check <- check_markers(monocle_cds, "~/__Data/Garnett/hsPBMC_markers.txt",
+                              db=org.Hs.eg.db,
+                              cds_gene_id_type = "SYMBOL",
+                              marker_file_gene_id_type = "SYMBOL")
+
+plot_markers(marker_check, label_size = 0.1)
+
+
+#### Train the classifier
+set.seed(123)
+pbmc_classifier <- train_cell_classifier(cds = pbmc_cds,
+                                         marker_file = "~/__Data/Garnett/hsPBMC_markers.txt",
+                                         db = org.Hs.eg.db,
+                                         cds_gene_id_type = "SYMBOL",
+                                         num_unknown = 50, ############ larger for larger datasets #############
+                                         marker_file_gene_id_type = "SYMBOL")
+
+feature_genes <- get_feature_genes(pbmc_classifier,
+                                   node = "root",
+                                   db = org.Hs.eg.db,
+                                   convert_ids = TRUE)
+
+
+```

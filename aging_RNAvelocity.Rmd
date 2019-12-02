@@ -1,0 +1,57 @@
+---
+title: "aging_RNAvelocity"
+author: "HB"
+date: "7/23/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Allocate memory  and use all CPUs
+
+```{r}
+library(future)
+plan(strategy = "multiprocess", workers = 16)    ############## set number of CPUs #################
+options(future.globals.maxSize = 20 * 1024 ^ 3)
+
+library("future.apply")
+library("stats")
+```
+
+## See:
+
+https://htmlpreview.github.io/?https://github.com/satijalab/seurat.wrappers/blob/master/docs/velocity.html
+https://github.com/satijalab/seurat-wrappers
+
+
+```{r stuff}
+library(Seurat)
+library(velocyto.R)
+library(SeuratWrappers)
+
+setwd("~/__Data/shelfLifeSLE/")
+pbmcSLE <- get(load("seuratObj_pbmc_shelfLifeSLE.RData"))
+
+selPBMC <- pbmcSLE[ , grep("BRISL5", colnames(pbmcSLE))]
+
+# selPBMC <- SCTransform(object = selPBMC, assay = "spliced")
+selPBMC[["spliced"]] <- selPBMC[["RNA"]]
+selPBMC <- RunPCA(object = selPBMC, verbose = FALSE)
+selPBMC <- FindNeighbors(object = selPBMC, dims = 1:20)
+selPBMC <- FindClusters(object = selPBMC)
+selPBMC <- RunUMAP(object = selPBMC, dims = 1:20)
+
+selPBMC <- RunVelocity(object = selPBMC, deltaT = 1, kCells = 25, fit.quantile = 0.02)
+ident.colors <- (scales::hue_pal())(n = length(x = levels(x = selPBMC)))
+names(x = ident.colors) <- levels(x = selPBMC)
+cell.colors <- ident.colors[Idents(object = selPBMC)]
+names(x = cell.colors) <- colnames(x = selPBMC)
+show.velocity.on.embedding.cor(emb = Embeddings(object = selPBMC, reduction = "umap"), vel = Tool(object = selPBMC, 
+    slot = "RunVelocity"), n = 200, scale = "sqrt", cell.colors = ac(x = cell.colors, alpha = 0.5), 
+    cex = 0.8, arrow.scale = 3, show.grid.flow = TRUE, min.grid.cell.mass = 0.5, grid.n = 40, arrow.lwd = 1, 
+    do.par = FALSE, cell.border.alpha = 0.1)
+
+```
+

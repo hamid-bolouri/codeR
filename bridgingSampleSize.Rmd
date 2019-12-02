@@ -1,0 +1,228 @@
+---
+title: "bridgingSampleSize"
+author: "HB"
+date: "7/30/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 120),
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+### Allocate memory  and use all CPUs
+
+```{r}
+library(future)
+plan(strategy = "multiprocess", workers = 24)    ############## set number of CPUs #################
+options(future.globals.maxSize = 20 * 1024 ^ 3)
+
+library("future.apply")
+library("stats")
+```
+
+
+```{r makeMats}
+setwd("~/__Data/shelfLife_LSE.v.HD")
+meta <- read.csv("library_metadata.csv", as.is=TRUE)
+# setwd("~/__Data/shelfLife_LSE.v.HD")
+# CLs <- read.csv("clustersK10.csv", header=TRUE, as.is=TRUE)
+# CLs$IDs <- unlist(lapply(strsplit(CLs$Barcode, "-"), function(x) x[1]))
+
+
+library(Matrix)
+setwd("~/__Data/shelfLife_LSE.v.HD")
+matsList <- readRDS("10k_total_reads_subsampled_count_matrices.rds")
+# matsList <- readRDS("20k_total_reads_subsampled_count_matrices.rds")
+# matsList <- readRDS("30k_total_reads_subsampled_count_matrices.rds")
+# matsList <- readRDS("40k_total_reads_subsampled_count_matrices.rds")
+
+countsList = allCounts = list(); i = 0
+for (N in c(8000, 5000, 2500, 1000, 500, 100, 50)) {
+   subMatsList <- lapply(matsList, function(x) x[ , sample(1:ncol(x), N)])
+   
+   # The down-sampled matrices have varying numbers of genes
+   genesList <- lapply(subMatsList, function(x) rownames(x))
+   freqTbl <- table(unlist(genesList))
+   sharedGenes <- names(which(freqTbl == 12))
+   
+   sharedList <- lapply(subMatsList, function(x) x[sharedGenes, ])
+   
+   HD <- meta$lib_name[meta$condition == "normal"]
+   SLE <- meta$lib_name[meta$condition == "sle"]
+   
+   matsHD <- do.call(cbind, sharedList[HD])
+   matsSLE <- do.call(cbind, sharedList[SLE])
+   
+    myMat <- cbind(matsHD, matsSLE)
+      
+   i <- i +1
+   Sys.time()
+   tmp <- as.matrix(myMat)
+   countList <- future_apply(tmp, 1, FUN=function(y) length(which(y > 1)))
+   allCounts[[i]] <- countList
+   Sys.time()
+}
+   
+setwd("~/__Data")
+saveRDS(allCounts, file="bridgingAllCOunts_10Kreads.RDS")
+
+N = c(8000, 5000, 2500, 1000, 500, 100, 50)
+par(mfrow=c(2,3))
+for (i in 1:length(allCounts)) {
+   hist(allCounts[[i]], breaks=25, col="Skyblue", border="white",
+        main=paste0("No. cells = ", N[i]), xlab="Non drop-out events")
+}
+
+setwd("~/__Plots")
+pdf("bridgingSample_ReadCellReqs.pdf")
+for (cT in c(50, 25, 10)) {
+   par(mfrow=c(2,2))
+   for (i in c(40, 30, 20, 10)) {
+      setwd("~/__Data")
+      selCounts <- readRDS(paste0("bridgingAllCOunts_", i, "Kreads.RDS"))
+      plot(unlist(lapply(selCounts, function(x) length(which(x > cT)))), cex.lab=1.25,
+           ylab="Genes detected in > 50 cells", xaxt='n', xlab="cells sequenced",
+           pch=20, col=rgb(0,0.5,1,0.5), main=paste0(i, "K reads, cT = ", cT), type="b")
+      axis(side=1, labels=c("5K", "2.5K", "1K", "500", "100", "50"), at=1:6)
+   }
+}
+dev.off()
+
+```
+
+
+
+
+
+
+
+
+## Plots:
+
+```{r makePlots}
+nDE = nDE0 = IDs = NULL
+for (nReads in c(10, 20, 30, 40)) {
+   DE <- readRDS(paste0("~/__Data/shelfLife_LSE.v.HD/DE_", nReads, "KG_10KC.RDS"))
+   nDE <- c(nDE, length(which(DE$pvalue.adj.FDR < 0.01 & 
+                             (DE$foldChange > 2 | DE$foldChange < 0.5))))
+   IDs <- c(IDs, paste0(nReads, "K reads"))
+   
+   DE.gr <- readRDS(paste0("~/__Data/shelfLife_LSE.v.HD/DEclasses_", nReads, "KG_10KC.RDS")) 
+   nDE0 <- c(nDE0, length(which(DE.gr$pvalue.adj.FDR < 0.01 & DE.gr$Type == "DEs" & 
+                             (DE$foldChange > 1 | DE$foldChange < 1))))
+}
+names(nDE) <- IDs
+names(nDE0) <- IDs
+barplot(rev(nDE), col="skyblue", border="white", xlim=c(0,3), width=c(0.5, 0.5, 0.5, 0.5))
+barplot(rev(nDE0), col="skyblue", border="white", xlim=c(0,3), width=c(0.5, 0.5, 0.5, 0.5))
+
+DE = nDE = nDE0 = IDs = NULL
+for (nCells in c(5000, 2500, 1000, 500, 100, 50)) {
+   IDs <- c(IDs, paste0(nCells, " cells"))
+   
+   fName <- paste0("~/__Data/shelfLife_LSE.v.HD/", nCells, "_DEclasses_40KG_10KC.RDS")
+   print(fName)
+   DE <- readRDS(fName) 
+   
+   nDE <- c(nDE, length(which(DE$pvalue.adj.FDR < 0.01 & 
+                            (DE$foldChange > 2 | DE$foldChange < 0.5))))
+   nDE0 <- c(nDE0, length(which(DE$pvalue.adj.FDR < 0.01 & 
+                            (DE$foldChange > 2 | DE$foldChange < 0.5) & 
+                             DE$Type == "DEs")))
+}
+names(nDE) <- IDs
+names(nDE0) <- IDs
+barplot(nDE, col="skyblue", border="white")
+barplot(nDE0, col="skyblue", border="white")
+
+```
+
+
+## compare differences in DE for 2-4 hours and 6-8 hours
+
+```{r varDE}
+
+setwd("~/__Data/shelfLife_LSE.v.HD")
+meta <- read.csv("library_metadata.csv", as.is=TRUE)
+
+setwd("~/__Data/Aldan.SLE.HD/clustering/kmeans_10_clusters")
+CLs <- read.csv("clusters.csv", header=TRUE, as.is=TRUE)
+CLs$IDs <- unlist(lapply(strsplit(CLs$Barcode, "-"), function(x) x[1]))
+
+
+library(dplyr)
+library(Matrix)
+library(Seurat)
+
+# Get HD+SLE exp matrix
+# setwd("/home/hamid.bolouri/__Data/Aldan.SLE.HD")
+# mat <- Read10X("filtered_feature_bc_matrix") # 33,538 genes x 280,674 cells
+# pbmc <- CreateSeuratObject(counts = mat, project = "agingAll", min.cells = 3, min.features = 200)
+# 
+# pbmc[["percent.mt"]] <- PercentageFeatureSet(object = pbmc, pattern = "^MT-")
+# pbmc <- FindVariableFeatures(object = pbmc,selection.method = 'vst', nfeatures = 2000)
+# 
+setwd("/home/hamid.bolouri/__Data/Aldan.SLE.HD")
+#save(pbmc, file="Seurat.pbmc.pre.scTransform_shelfLifeALL.RData")
+pbmc <- get(load("Seurat.pbmc.pre.scTransform_shelfLifeALL.RData"))
+
+gc()
+pbmc <- SCTransform(object = pbmc, verbose = FALSE, vars.to.regress = 'percent.mt', conserve.memory = FALSE)
+# Transformed data will be available in the SCT assay, 
+# which is set as the default after running sctransform
+
+# names(pbmc) #  "RNA" "SCT" 
+normalizedPBMC <- GetAssayData(object = pbmc, assay="SCT", slot = "data")
+setwd("/home/hamid.bolouri/__Data/Aldan.SLE.HD")
+save(normalizedPBMC, file="SeuratNormalizedCountsALL_GRCh38_filteredMT.RData")
+save(pbmc, file="seuratObj_pbmc_shelfLifeALL.RData")
+
+# Subset for 2, 4, 6, and 8 hours. Then for each subset:
+
+   subMatsList <- XXX
+   
+   HD <- meta$lib_name[meta$condition == "normal"]
+   SLE <- meta$lib_name[meta$condition == "sle"]
+   
+   matsHD <- do.call(cbind, sharedList[HD])
+   matsSLE <- do.call(cbind, sharedList[SLE])
+   
+   # Subset for B cells (CD19+CD22+CD79+)
+   
+   j <- match(colnames(matsHD), CLs$ID[CLs$Cluster == 7]) 
+   j <- which(!is.na(j))
+   subsetHD <- matsHD[ , j]
+   
+   j <- match(colnames(matsSLE), CLs$ID[CLs$Cluster == 7]) 
+   j <- which(!is.na(j))
+   subsetSLE <- matsSLE[ , j]
+   
+   # myMat <- cbind(do.call(cbind, sharedList[HD]), do.call(cbind, sharedList[SLE]))
+   myMat <- cbind(subsetHD, subsetSLE)
+      
+   group <- factor(c(rep(1, ncol(subsetHD)), rep(2, ncol(subsetSLE))))
+   
+   library(stats)
+   library(BiocParallel)
+   library(DEsingle)
+   param <- MulticoreParam(workers = 96, progressbar = TRUE)
+   register(param)
+   
+   Sys.time()
+   tmp <- as.matrix(myMat)
+   DE <- DEsingle(counts = tmp, group = group, parallel = TRUE, BPPARAM = param)
+   Sys.time()
+   DE.classes <- DEtype(results = DE, threshold = 0.05)
+   Sys.time()
+   
+   setwd("~/__Data/shelfLife_LSE.v.HD")
+   saveRDS(DE, file=paste0(N, "_DE_40KG_10KC.RDS"))
+   saveRDS(DE.classes, file=paste0(N, "_DEclasses_40KG_10KC.RDS"))
+   print(N)
+
+```

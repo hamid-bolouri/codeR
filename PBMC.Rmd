@@ -1,0 +1,334 @@
+---
+title: "GEO.PBMC"
+author: "Hamid.Bolouri"
+date: "1/13/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Read 10X scRNA-seq read counts matrices
+
+```{r ReadSparseMAtrix}
+library(Matrix)
+```
+
+## Read bulk PBMC datasets
+
+#### NOT USE: BAMs only!
+#
+# GSE32874 <- getGEO("GSE32874") 
+# NB GSE32874 divides into 2: part 1 is 5 miR timepoints, part 2 is mRNA
+# GSE32874.miR <- GSE32874[[1]]
+# GSE32874.mRNA <- GSE32874[[2]] # empty, BAMs only
+
+# metaGSE32874.mRNA <- pData(GSE32874.mRNA)
+# iHealthy <- which(metaGSE32874.mRNA$`disease status:ch1` == "Healthy")
+# metaGSE32874.mRNA$title[iHealthy]
+## [1] RNA-Seq of timepoint 5  RNA-Seq of timepoint 6  RNA-Seq of timepoint 7  RNA-Seq of timepoint 8
+## [5] RNA-Seq of timepoint 17 RNA-Seq of timepoint 18 RNA-Seq of timepoint 19 RNA-Seq of timepoint 20 
+## [11]RNA-Seq of timepoint 21
+# expGSE32874 <- exprs(GSE32874.mRNA)
+
+# GSE122459 <- getGEO("GSE122459") # empty. Dowloaded counts as Excel, saved healthy as CSV
+# GSE72502 <- getGEO("GSE72502")[[1]] # empty. Only available as Excel sheet of FPKMs.
+# GSE101437 <- getGEO("GSE101437")[[1]] # empty. Downloaded "RAW" which tunred out to be FPKM!
+# GSE115259 <- getGEO("GSE115259") # Gave error. Downloaded "RAW", which turned out to have TPM & FPKM.
+
+# GSE87290 <- getGEO("GSE87290")[[1]] # Empty. Only available as raw reads from SRA.
+#
+#### end not use.
+
+
+``` {r bulkGEO}
+
+library(GEOquery)
+
+#### BRI / Cate Speake data: ####
+
+#### Not use: Bioconductor meta data labels not same as on GEO !!!
+# GSE60424 <- getGEO("GSE60424")[[1]]
+# metaGSE60424 <- pData(GSE60424)
+# iHealthy <- grep("Healthy", GSE60424$`diseasestatus:ch1`)
+# iB <- metaGSE60424$title[intersect(iHealthy, which(metaGSE60424[ , "celltype:ch1"] == "B-cells"))]
+# iCD4 <- metaGSE60424$title[intersect(iHealthy, which(metaGSE60424[ , "celltype:ch1"] == "CD4"))]
+# iCD8 <- metaGSE60424$title[intersect(iHealthy, which(metaGSE60424[ , "celltype:ch1"] == "CD8"))]
+# iMono <- metaGSE60424$title[intersect(iHealthy, which(metaGSE60424[ , "celltype:ch1"] == "Monocytes"))]
+# iNeut <- metaGSE60424$title[intersect(iHealthy, which(metaGSE60424[ , "celltype:ch1"] == "Neutrophils"))]
+# iNK <- metaGSE60424$title[intersect(iHealthy, which(metaGSE60424[ , "celltype:ch1"] == "NK"))]
+# iBlood <- metaGSE60424$title[intersect(iHealthy, which(metaGSE60424[ , "celltype:ch1"] == "Whole Blood"))]
+# # expGSE60424 <- exprs(GSE60424) # Empty. Use my mm2Hs R object instead: 
+# Q <- "/Users/hamid.bolouri/Dropbox/__AIImm/__dataPBMC/GSE60424.geneSymbols.RData"
+# expGSE60424 <- get(load(file=Q))
+# GSE60424.B <- expGSE60424[ , iB]
+# GSE60424.CD4 <- expGSE60424[ , iCD4]
+# GSE60424.CD8 <- expGSE60424[ , iCD8]
+# GSE60424.Mono <- expGSE60424[ , iMono]
+# GSE60424.Neut <- expGSE60424[ , iNeut]
+# GSE60424.NK <- expGSE60424[ , iNK]
+# GSE60424.wholeBlood <- expGSE60424[ , iBlood]
+
+metaGSE60424 <- read.csv("/Users/H/Desktop/Dropbox/__AIImm/__dataPBMC/metaSelGSE60424.csv", as.is=TRUE)
+Q <- "/Users/H/DEsktop/Dropbox/__AIImm/__dataPBMC/GSE60424_GEOSubmit_FC1to11_normalized_counts.txt"
+GSE60424 <- read.delim(Q, header=TRUE, row.names=1, as.is=TRUE)
+GSE60424 <- GSE60424[ , metaGSE60424$ID] # identical(colnames(GSE60424), metaGSE60424$ID) # TRUE
+
+library(EnsDb.Hsapiens.v86)
+symbols <- select(EnsDb.Hsapiens.v86, key=rownames(GSE60424), columns=c("ENTREZID", "SYMBOL"), keytype="GENEID")
+# Of 50045 ENSEMBL IDs, 45753 return symbols, including 1531 duplicates.
+library(limma)
+GSE60424 <- avereps(GSE60424[symbols$GENEID, ], ID=symbols$SYMBOL) # 44222 x 28
+
+cellTypes <- split(colnames(GSE60424), metaGSE60424$cellType)
+
+X = GSE60424 # [ , cellTypes[["B-cells"]] ]
+library(edgeR)
+y <- DGEList(counts = X)
+y <- calcNormFactors(y)
+CPM <- cpm(y)
+
+#### 1 Feb 2019: Select house keeping genes for Adam:
+medianExp <- apply(CPM, 1, median)
+M <- median(medianExp[medianExp > 0])
+sel <- names(which(medianExp > 0.9*M & medianExp < 1.1*M)) # 604
+# MADs <- apply(CPM[sel, ], 1, mad) # most sel are zero + outlier
+iqr <- apply(CPM[sel, ], 1, IQR)
+summary(CPM[names(iqr[iqr == min(iqr)]), ]) # "NSUN3""
+#   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#  7.192  13.271  14.807  15.350  16.330  36.823
+SDs <- apply(CPM[sel, ], 1, sd)
+summary(CPM[names(SDs[SDs == min(SDs)]), ]) # "KATNA1"
+#   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#  6.928  14.111  15.269  15.151  17.181  24.352 
+summary(CPM["GUSB", ])
+#   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#  15.71   46.12   51.61   67.26   74.67  264.55 
+Z <- t(apply(CPM[sel, ], 1, scale))
+zMax <- apply(Z, 1, function(x) max(abs(x)))
+summary(CPM[names(zMax[zMax == min(zMax)]), ]) # "EXOG"
+#   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#  0.000   5.117  16.095  12.388  19.261  24.878 
+
+CateGenes <- c("CD3D", "CD3E", "CD3G", "CD4", "CD8A", "CD8B", 
+               "CD14", "CD19", "MS4A1", "FUT4", "NCAM1") 
+# CD14=Mono, FUT4=CD15=Neut, MS4A1=CD20=B, NCAM1=CD56=NK
+CateCPM <- log2(CPM[CateGenes, ] + 1)
+
+library(pheatmap)
+annotCells <- data.frame(type=rep(names(cellTypes), each=4))
+rownames(annotCells) <- unlist(cellTypes)
+pheatmap(CateCPM, scale='none', annotation_col=annotCells)
+
+#### Is low FUT4 (CD15) expression due to short gene length?
+# library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+# txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene
+# tx_by_gene <- transcriptsBy(txdb, by="gene")
+# gene_lens <- max(width(tx_by_gene))
+# gene_lens["2526"]
+# hist(gene_lens[gene_lens < 500000], breaks=100, border="white", col="skyblue", 
+#     xlab="Max transcript lengths per hg19 gene (bp)", main="")
+# lines(x=c(6048, 6048), y=c(0,10000), col="red", lty=2, lwd=2)
+
+
+PCA <- prcomp(t(log2(CPM + 1)))
+varPC1 <- signif(100*summary(PCA)$importance['Proportion of Variance', 1], 3)
+varPC2 <- signif(100*summary(PCA)$importance['Proportion of Variance', 2], 3)
+plot(PCA$x, col=rgb(0,0.5,1,1), pch=19, xaxt='n', yaxt='n', cex=2,
+     xlab=paste0("PC1 proportion of variance = ", varPC1),
+     ylab=paste0("PC2 proportion of variance = ", varPC2))
+
+
+
+GSE47353 <- getGEO("GSE47353")[[1]] # Microarray. SDY80 in ImmuneSpace. 64 X baseline + days 1, 7, 70 post vaccine.
+metaGSE47353 <- pData(GSE47353)
+expGSE47353 <- exprs(GSE47353) # histogram confirms data is logged
+
+# Could not find match to row IDs of the eset:
+# library("hugene10stprobeset.db")
+# library(hugene10sttranscriptcluster.db)
+# x <- hugene10sttranscriptclusterSYMBOL # hugene10stprobesetSYMBOL # 
+# mapped_probes <- mappedkeys(x)
+# xx <- as.list(x[mapped_probes])
+# indx <- match(rownames(expGSE47353), names(xx))
+
+# feature map table from ImmuneSpace didn't match either:
+# featureMap <- read.csv("/Users/hamid.bolouri/Dropbox/__AIImm/__dataPBMC/GSE47353/FeatureAnnotation_GSE47353.csv", 
+#                         as.is=TRUE)[ ,1:2]
+# mySymbols <- featureMap$Gene.Symbol[match(rownames(expGSE47353), featureMap$Feature.Id)]
+
+
+# Extract gene symbols from featureData
+tmp <- featureData(GSE47353)$gene_assignment
+iTmp <- which(tmp != "---")
+expGSE47353 <- expGSE47353[iTmp, ]
+tmp <- tmp[iTmp]
+tmp2 <- sapply(tmp, function(x) strsplit(x, " "))
+geneSymbols <- unlist(lapply(tmp2, function(x) if (length(x) > 2) return(x[3])))
+rownames(expGSE47353) <- geneSymbols
+library(limma)
+expGSE47353 <- avereps(expGSE47353) # 23307 x 292
+save(expGSE47353, 
+     file="/Users/hamid.bolouri/Dropbox/__AIImm/__dataPBMC/GSE47353/GSE47353.RData")
+
+```
+
+
+## Joint ATAC-seq and RNA-seq 
+
+(Ryan Corces & Jason Buenrostro)
+https://portals.broadinstitute.org/single_cell/study/atlas-of-human-blood-dendritic-cells-and-monocytes
+
+DC1: CLEC9A C1ORF54 CADM1 CAMK2D IDO1 XCR1 
+DC2: CD1C FCER1A CLEC10A ADAM8 CD1D FCGR2B
+DC3: S100A9 S100A8 VCAN RNASE2 CD1C FCER1A CLEC10A
+DC4: FCGR3A FTL SERPINA1 LST1 AIF1 LILRB2 TMEM176B LOC200772 CLEC4F
+DC5: AXL PPP1R14A SIGLEC6 CD22 CD5 SIGLEC1
+DC6: GZMB IGJ AK128525 SERPINF1 ITM2C TCF4 CLEC4C NRP1
+Mono1: CD14 VCAN S100A8 S100A9 FCN1 ITGAM
+Mono2: LAIR2 ASAH1 APOBEC3A TSPAN14 LIPA ITGAM
+Mono3 (also shares signature with Mono1): G0S2 CXCR1 CXCR2 NAMPT NEAT1 AL137655 CSF3R CD14 VCAN S100A8 S100A9 FCN1 ITGAM
+Mono4 (also shares signature with Mono1): PRF1 GNLY CTSW FGFBP2 IL2RB GZMA CD14 VCAN S100A8 S100A9 FCN1 ITGAM
+
+
+```{r RNA-ATAC, echo=FALSE, message=FALSE, warning=FALSE}
+
+GSE74246 <- getGEO("GSE74246")
+# metaGSE74246.1 <- pData(GSE74246[[1]]) # AML blasts and LSCs
+metaGSE74246.2 <- pData(GSE74246[[2]])
+Q <- "CD19\\+CD20\\+ B|CD56\\+ natural killer|CD8\\+ T|CD14\\+ monocyte cell|CD4\\+ T"
+iSel <- grep(Q, metaGSE74246.2$`cell type:ch1`)
+selIDs <- as.character(metaGSE74246.2$title[iSel])
+# expGSE74246.2 <- exprs(GSE74246[[2]])  # Empty. Downloded manually.
+expGSE74246 <- read.delim("/Users/hamid.bolouri/Dropbox/__AIImm/__dataPBMC/GSE74246_RNAseq_All_Counts.txt",
+                          header=TRUE, as.is=TRUE, row.names=1)
+colnames(expGSE74246) <- gsub("^X", "", colnames(expGSE74246))
+colnames(expGSE74246) <- gsub("\\.", "-", colnames(expGSE74246))
+expGSE74246 <- expGSE74246[ , selIDs]
+save(expGSE74246, file="/Users/hamid.bolouri/Dropbox/__AIImm/__dataPBMC/expGSE74246.RData")
+
+GSE74912 <- getGEO("GSE74912")
+# metaGSE74912.1 <- pData(GSE74912[[1]]) # Leukemias and LSCs
+metaGSE74912.2 <- pData(GSE74912[[2]])
+Q <- "CD19\\+CD20\\+ B|CD56\\+ natural killer|CD8\\+ T|CD14\\+ monocyte cell|CD4\\+ T"
+iSel <- grep(Q, metaGSE74912.2$`cell type:ch1`)
+selIDs <- as.character(metaGSE74912.2$title[iSel])
+selIDs <- gsub("^Donor", "", selIDs)
+# expGSE74912.2 <- exprs(GSE74912[[2]])  # Empty. Downloaded manually.
+atacGSE74912 <- read.delim("/Users/hamid.bolouri/Dropbox/__AIImm/__dataPBMC/GSE74912_ATACseq_All_Counts.txt",
+                          header=TRUE, as.is=TRUE)
+colnames(atacGSE74912) <- gsub("^X", "", colnames(atacGSE74912))
+colnames(atacGSE74912) <- gsub("\\.", "-", colnames(atacGSE74912))
+colnames(atacGSE74912) <- gsub("Donor", "", colnames(atacGSE74912))
+atacGSE74912 <- atacGSE74912[ , c("Chr", "Start","End", selIDs)]
+save(atacGSE74912, file="/Users/hamid.bolouri/Dropbox/__AIImm/__dataPBMC/atacGSE74912.RData")
+
+```
+
+
+## Roche PBMC subsets Affy data (Kerry's recommendation)
+
+CD4+ T cells, 
+CD8+ (CD8A) T cells, 
+CD56+ (NCAM1) NK cells, 
+CD19+ B cells, 
+CD16+CD66b+ (FCGR3B+, CEACAM8) Neutrophils, 
+CD16-CD66b+ (FCGR3B-, CEACAM8) Eosinophils, 
+CD14+ Monocytes, 
+CD123+ (IL3RA) pDCs,
+CD11c+ (ITGAL, ITGAM) mDCs (ITGAL is uniformly high)
+
+```{r RocheAffy}
+# BiocManager::install("affy", version = "3.8")
+library(affy)
+setwd("/Users/hamid.bolouri/Dropbox/__AIImm/__dataPBMC/GSE28490/")
+esetRoche <- justRMA()
+
+phenoRoche <- pData(esetRoche)
+cellTypes <- sapply(rownames(phenoRoche), function(x) strsplit(x, "mRNA_"))
+cellTypes <- lapply(cellTypes, function(x) x[2])
+cellTypes <- lapply(cellTypes, function(x)  strsplit(x, "_"))
+cellTypes <- unlist(lapply(cellTypes, function(x) x[[1]][1]))
+
+# Convert probe values to gene expression
+expRoche <- exprs(esetRoche)
+library(hgu133plus2.db)
+x <- hgu133plus2SYMBOL
+mapped_probes <- mappedkeys(x)
+xx <- as.list(x[mapped_probes])
+indx <- match(rownames(expRoche), names(xx))
+expRoche <- expRoche[which(!is.na(indx)), ]
+genesRoche <- xx[indx[!is.na(indx)]]
+library(limma)
+avExpRoche <- avereps(expRoche, genesRoche)
+
+markersRoche <- c("CD4", "CD8A", "NCAM1", "CD19", "FCGR3B", "CEACAM8", 
+                  "CD14", "IL3RA", "ITGAM") # ITGAL high everywhere
+markerExpRoche <- avExpRoche[markersRoche, ]
+colnames(markerExpRoche) <- cellTypes
+
+library(pheatmap)
+pheatmap(markerExpRoche, scale='none')
+# Poor classification of CD4 and eosinophils
+# Probably due to bad probes averaged by 'avereps'. Try IQR:
+
+IQRs <- apply(expRoche, 1, IQR)
+selIndx <- tapply(1:nrow(expRoche), unlist(genesRoche), function(x) {
+				  x[which.max(IQRs[x])] })
+iqrRoche <- expRoche[selIndx, ]										# 51573 x 494
+rownames(iqrRoche) <- names(selIndx)
+
+markersRoche <- c("CD4", "CD8A", "NCAM1", "CD19", "FCGR3B", "CEACAM8", 
+                  "CD14", "IL3RA", "ITGAM", "ITGAL") 
+markerExpRoche <- iqrRoche[markersRoche, ]
+colnames(markerExpRoche) <- cellTypes
+
+pheatmap(markerExpRoche, scale='none')
+
+
+```
+
+
+## 10X data sets
+
+Using Bioc package
+
+```{r 10X, echo=FALSE, message=FALSE, warning=FALSE}
+# BiocManager::install("TENxPBMCData", version = "3.8")
+library(TENxPBMCData)
+
+pbmc68k.10X <- TENxPBMCData(dataset = "pbmc68k") # fresh PBMC from donor A
+pbmc33k.10X <- TENxPBMCData(dataset = "pbmc33k")
+pbmc8k.10X <- TENxPBMCData(dataset = "pbmc8k")
+pbmc6k.10X <- TENxPBMCData(dataset = "pbmc6k")
+pbmc4k.10X <- TENxPBMCData(dataset = "pbmc4k")
+pbmc3k.10X <- TENxPBMCData(dataset = "pbmc3k")
+pbmcFa.10X <- TENxPBMCData(dataset = "frozen_pbmc_donor_a") # frozen
+pbmcFb.10X <- TENxPBMCData(dataset = "frozen_pbmc_donor_b") # frozen
+pbmcFb.10X <- TENxPBMCData(dataset = "frozen_pbmc_donor_b") # frozen
+
+# options(DelayedArray.block.size=1e9) # set memory usage
+
+lib.sizes <- colSums(counts(pbmc68k.10X))
+n.exprs <- colSums(counts(pbmc68k.10X) != 0L)
+ave.exprs <- rowMeans(counts(pbmc68k.10X))
+
+summary(lib.sizes)
+summary(n.exprs)
+summary(ave.exprs)
+
+# BiocManager::install("scran", version = "3.8") 
+library(scran)
+
+
+
+```
+
+
+
+
+
+

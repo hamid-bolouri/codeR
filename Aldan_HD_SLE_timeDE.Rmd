@@ -1,0 +1,260 @@
+---
+title: "HD_SLE_DE"
+author: "HB"
+date: "7/17/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 120),
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+### Allocate memory  and use all CPUs
+
+```{r}
+library(future)
+plan(strategy = "multiprocess", workers = 8)    ############## set number of CPUs #################
+options(future.globals.maxSize = 20 * 1024 ^ 3)
+
+library("future.apply")
+library("stats")
+```
+
+## scTransform data
+
+```{r varDE}
+# library(dplyr)
+# library(Matrix)
+# library(Seurat)
+
+# Get HD+SLE exp matrix
+# setwd("/home/hamid.bolouri/__Data/Aldan.SLE.HD")
+# mat <- Read10X("filtered_feature_bc_matrix") # 33,538 genes x 280,674 cells
+# pbmc <- CreateSeuratObject(counts = mat, project = "agingAll", min.cells = 3, min.features = 200)
+# 
+# pbmc[["percent.mt"]] <- PercentageFeatureSet(object = pbmc, pattern = "^MT-")
+# pbmc <- FindVariableFeatures(object = pbmc,selection.method = 'vst', nfeatures = 2000)
+# 
+# setwd("/home/hamid.bolouri/__Data/Aldan.SLE.HD")
+# #save(pbmc, file="Seurat.pbmc.pre.scTransform_shelfLifeALL.RData")
+# pbmc <- get(load("Seurat.pbmc.pre.scTransform_shelfLifeALL.RData"))
+# 
+# gc()
+# pbmc <- SCTransform(object = pbmc, verbose = FALSE, vars.to.regress = 'percent.mt', conserve.memory = FALSE)
+# Transformed data will be available in the SCT assay, 
+# which is set as the default after running sctransform
+
+# # names(pbmc) #  "RNA" "SCT" 
+# normalizedPBMC <- GetAssayData(object = pbmc, assay="SCT", slot = "data")
+# setwd("/home/hamid.bolouri/__Data/Aldan.SLE.HD")
+# save(normalizedPBMC, file="SeuratNormalizedCountsALL_GRCh38_filteredMT.RData")
+# save(pbmc, file="seuratObj_pbmc_shelfLifeALL.RData")
+```
+
+## Select data subsets
+
+```{r makeMats}
+library(dplyr)
+library(Matrix)
+
+setwd("/home/hamid.bolouri/__Data/Aldan.SLE.HD")
+normalizedPBMC <- get(load("SeuratNormalizedCountsALL_GRCh38_filteredMT.RData"))
+# library(Seurat)
+# pbmc <- get(load("seuratObj_pbmc_shelfLifeALL.RData"))
+
+setwd("~/__Data/shelfLife_LSE.v.HD")
+annot <- read.csv("library_metadata.csv", as.is=TRUE)
+
+setwd("~/__Data/shelfLifeSLE/")
+meta <- get(load("Aggr_Human_Immunology_RTX-850-856_GRCh38-3.0.0_premrna_samp.dat_v3_reads.RData"))
+
+tags <- unlist(lapply(sapply(meta[ ,1], function(x) strsplit(x, "BRISL")), function(y) y[1]))
+tagsHD <- tags[grep("BRISL2|BRISL3|BRISL4", names(tags))]
+tagsSLE <- tags[grep("BRISL5|BRISL6|BRISL7", names(tags))]
+tagsHD2 <- tagsHD[grep("-2h", names(tagsHD))]
+tagsHD4 <- tagsHD[grep("-4h", names(tagsHD))]
+tagsHD6 <- tagsHD[grep("-6h", names(tagsHD))]
+tagsHD8 <- tagsHD[grep("-8h", names(tagsHD))]
+tagsSLE2 <- tagsSLE[grep("-2h", names(tagsSLE))]
+tagsSLE4 <- tagsSLE[grep("-4h", names(tagsSLE))]
+tagsSLE6 <- tagsSLE[grep("-6h", names(tagsSLE))]
+tagsSLE8 <- tagsSLE[grep("-8h", names(tagsSLE))]
+
+setwd("~/__Data/Aldan.SLE.HD/clustering/kmeans_10_clusters")
+CLs <- read.csv("clusters.csv", header=TRUE, as.is=TRUE)
+CLs$IDs <- unlist(lapply(strsplit(CLs$Barcode, "-"), function(x) x[1]))
+# Cluster 6 is B cells. See Loupe images in GDrive > hamid.workspace > shelfLife
+
+tagsCL6 <- CLs$Barcode[CLs$Cluster == 6] # 19,804 cells
+
+tagsHD2.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsHD2)))]
+tagsHD4.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsHD4)))]
+tagsHD6.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsHD6)))]
+tagsHD8.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsHD8)))]
+tagsSLE2.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsSLE2)))]
+tagsSLE4.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsSLE4)))]
+tagsSLE6.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsSLE6)))]
+tagsSLE8.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsSLE8)))]
+
+#### For Tom, use cluster 1 == CD8+ T Cells
+tagsCL6 <- CLs$Barcode[CLs$Cluster == 1] # 101,233 cells
+
+tagsHD2.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsHD2)))]
+tagsHD4.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsHD4)))]
+tagsHD6.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsHD6)))]
+tagsHD8.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsHD8)))]
+tagsSLE2.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsSLE2)))]
+tagsSLE4.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsSLE4)))]
+tagsSLE6.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsSLE6)))]
+tagsSLE8.6 <- tagsCL6[which(!is.na(match(tagsCL6, tagsSLE8)))]
+
+```
+
+```{r DE}
+library(stats)
+library(BiocParallel)
+library(DEsingle)
+param <- MulticoreParam(workers = 96, progressbar = TRUE)
+register(param)
+
+indx <- match(tagsHD4.6, colnames(normalizedPBMC))
+indx <- indx[!is.na(indx)]
+subsetHD <- normalizedPBMC[ , indx]
+
+indx <- match(tagsSLE4.6, colnames(normalizedPBMC))
+indx <- indx[!is.na(indx)]
+subsetSLE <- normalizedPBMC[ , indx]
+
+myMat <- cbind(subsetHD, subsetSLE)
+   
+group <- factor(c(rep(1, ncol(subsetHD)), rep(2, ncol(subsetSLE))))
+
+Sys.time()
+tmp <- as.matrix(myMat)
+DE <- DEsingle(counts = tmp, group = group, parallel = TRUE, BPPARAM = param)
+Sys.time()
+# DE.classes <- DEtype(results = DE, threshold = 0.05)
+# Sys.time()
+
+setwd("~/__Data/Aldan.SLE.HD")
+#saveRDS(DE, file="DE2SLE.8HD_SLEvHD.RDS")
+# saveRDS(DE.classes, file="DEclasses.RDS")
+
+
+#### Tom:
+setwd("~/__Data/Aldan.SLE.HD")
+saveRDS(DE, file="DE4SLE.4HD_Cluster1CD8.RDS")
+write.csv(DE, file="DE4SLE.4HD_Cluster1CD8.CSV")
+```
+
+## Sub-sampling plots:
+
+```{r makePlots}
+setwd("~/__Data/Aldan.SLE.HD")
+DE2 <- readRDS("DE2Hr_SLEvHD.RDS")
+DE4 <- readRDS("DE4Hr_SLEvHD.RDS")
+DE6 <- readRDS("DE6Hr_SLEvHD.RDS")
+DE8 <- readRDS("DE8Hr_SLEvHD.RDS")
+DE2.8 <- readRDS("DE2SLE.8HD_SLEvHD.RDS")
+DE8.2 <- readRDS("DE8SLE.2HD_SLEvHD.RDS")
+
+DE2 <- rownames(DE2)[which(DE2$pvalue.adj.FDR < 0.01 & (DE2$foldChange > 2 | DE2$foldChange < 0.5))]
+DE4 <- rownames(DE4)[which(DE4$pvalue.adj.FDR < 0.01 & (DE4$foldChange > 2 | DE4$foldChange < 0.5))]
+DE6 <- rownames(DE6)[which(DE6$pvalue.adj.FDR < 0.01 & (DE6$foldChange > 2 | DE6$foldChange < 0.5))]
+DE8 <- rownames(DE8)[which(DE8$pvalue.adj.FDR < 0.01 & (DE8$foldChange > 2 | DE2.8$foldChange < 0.5))]
+DE2.8 <- rownames(DE2.8)[which(DE2.8$pvalue.adj.FDR < 0.01 & (DE2.8$foldChange > 2 | DE2.8$foldChange < 0.5))]
+DE8.2 <- rownames(DE8.2)[which(DE8.2$pvalue.adj.FDR < 0.01 & (DE8.2$foldChange > 2 | DE8.2$foldChange < 0.5))]
+
+counts = c(DE2Hr=length(DE2), DE4Hr=length(DE4), DE6Hr=length(DE6), DE8Hr=length(DE8),
+           DE2.8=mean(c(length(DE2.8), SLE8HD2=length(DE8.2))))
+
+setwd("~/__Plots")
+pdf("Aldan_SLE.HD_DE_byTimePoint.pdf")
+barplot(counts, col="skyblue", border="white")
+dev.off()
+
+library("eulerr")
+
+setwd("~/__Plots")
+pdf("Aldan_SLE.HD_VennDE.pdf")
+plot(euler(list(DE2Hr=DE2, DE4Hr=DE4, DE6Hr=DE6, DE8Hr=DE8),
+           # DE2.8=unique(c(DE2.8, DE8.2))), 
+             shape = "ellipse"), quantities = TRUE) # , main="",  
+       # col=c("red", "blue", "green", "black", "pink", "tan1"))
+dev.off()
+
+```
+
+
+## compare differences in DE for 2-4 hours and 6-8 hours
+
+
+```{r calcDE}
+library(dplyr)
+library(Matrix)
+library(Seurat)
+
+setwd("~/__Data/shelfLife_LSE.v.HD")
+meta <- read.csv("library_metadata.csv", as.is=TRUE)
+
+setwd("~/__Data/Aldan.SLE.HD/clustering/kmeans_10_clusters")
+CLs <- read.csv("clusters.csv", header=TRUE, as.is=TRUE)
+CLs$IDs <- unlist(lapply(strsplit(CLs$Barcode, "-"), function(x) x[1]))
+
+# Cluster 6 is B cells. See Loupe images in GDrive > hamid.workspace > shelfLife
+
+setwd("/home/hamid.bolouri/__Data/Aldan.SLE.HD")
+normalizedPBMC <- get(load("SeuratNormalizedCountsALL_GRCh38_filteredMT.RData"))
+# pbmc <- get(load("seuratObj_pbmc_shelfLifeALL.RData"))
+
+# Subset for 2, 4, 6, and 8 hours. Then for each subset:
+
+   subMatsList <- XXX
+   
+   HD <- meta$lib_name[meta$condition == "normal"]
+   SLE <- meta$lib_name[meta$condition == "sle"]
+   
+   matsHD <- do.call(cbind, sharedList[HD])
+   matsSLE <- do.call(cbind, sharedList[SLE])
+   
+   # Subset for B cells (CD19+CD22+CD79+)
+   
+   j <- match(colnames(matsHD), CLs$ID[CLs$Cluster == 7]) 
+   j <- which(!is.na(j))
+   subsetHD <- matsHD[ , j]
+   
+   j <- match(colnames(matsSLE), CLs$ID[CLs$Cluster == 7]) 
+   j <- which(!is.na(j))
+   subsetSLE <- matsSLE[ , j]
+   
+   # myMat <- cbind(do.call(cbind, sharedList[HD]), do.call(cbind, sharedList[SLE]))
+   myMat <- cbind(subsetHD, subsetSLE)
+      
+   group <- factor(c(rep(1, ncol(subsetHD)), rep(2, ncol(subsetSLE))))
+   
+   library(stats)
+   library(BiocParallel)
+   library(DEsingle)
+   param <- MulticoreParam(workers = 96, progressbar = TRUE)
+   register(param)
+   
+   Sys.time()
+   tmp <- as.matrix(myMat)
+   DE <- DEsingle(counts = tmp, group = group, parallel = TRUE, BPPARAM = param)
+   Sys.time()
+   DE.classes <- DEtype(results = DE, threshold = 0.05)
+   Sys.time()
+   
+   setwd("~/__Data/shelfLife_LSE.v.HD")
+   saveRDS(DE, file=paste0(N, "_DE_40KG_10KC.RDS"))
+   saveRDS(DE.classes, file=paste0(N, "_DEclasses_40KG_10KC.RDS"))
+   print(N)
+
+```
+
+

@@ -1,0 +1,96 @@
+---
+title: "TF_expInDeep2Hr"
+author: "HB"
+date: "08/24/2019"
+output:
+  html_document:
+    theme: united
+    df_print: kable
+date: 'Compiled: `r format(Sys.Date(), "%B %d, %Y")`'
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 120),
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+### Allocate memory  and use all CPUs
+
+```{r}
+library(future)
+plan(strategy = "multiprocess", workers = 8)    ############## set number of CPUs #################
+options(future.globals.maxSize = 20 * 1024 ^ 3)
+
+library("future.apply")
+library("stats")
+```
+
+```{r getHighDepthData}
+library("tidyverse")
+library("Matrix")
+library("Seurat")
+library("scater")
+
+CLs <- read.csv("/home/hamid.bolouri/__Data/Aldan.deep2hr/clustering/kmeans_30_clusters/clusters.csv")
+
+mat <- Read10X("/home/hamid.bolouri/__Data/Aldan.deep2hr")
+pbmc <- CreateSeuratObject(counts=mat, project="shelfLife", min.cells=3, 
+                           min.features=200, meta.data=CLs)
+Idents(pbmc) <- paste0("C", CLs$Cluster) # using cellRanger clusters
+
+rm(mat) # clean up
+gc()    # clear memory
+
+setwd("~/__Plots")
+pbmc.sce <- as.SingleCellExperiment(pbmc)
+
+p1 <- plotExpression(pbmc.sce, features = "TCF7", x = "ident", colour_by = "ident", 
+                     xlab="CellRanger clusters", add_legend = FALSE) + 
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# Optional extra: size_by = "FOXO1", 
+
+# p2 <- plotPCA(pbmc.sce, colour_by = "ident")
+
+CombinePlots(plots = list(p1))
+
+```
+
+# Using only 20K reads per cell
+
+```{r lowDEpth}
+setwd("~/__Data/shelfLife_LSE.v.HD")
+meta <- read.csv("library_metadata.csv", as.is=TRUE)
+
+library(Matrix)
+setwd("~/__Data/shelfLife_LSE.v.HD")
+mat <- readRDS("20k_total_reads_subsampled_count_matrices.rds")
+
+genesList <- lapply(mat, function(x) rownames(x))
+freqTbl <- table(unlist(genesList))
+sharedGenes <- names(which(freqTbl == 12))
+sharedList <- lapply(mat, function(x) x[sharedGenes, ])
+h2 <- meta$lib_name[meta$time == "2h"]
+mat2H <- do.call(cbind, sharedList[h2])
+
+pbmc20K <- CreateSeuratObject(counts=mat2H, project="shelfLife", min.cells=3, 
+                           min.features=200)
+
+TF = "TCF7"
+selExp <- as.vector(pbmc20K[["RNA"]][TF, ])
+counts <- table(selExp)
+logCounts <- log2(counts + 1)
+barplot(logCounts, names.arg=names(counts), las=2,
+        col=rgb(0.75,0.2,0,0.25), border="white",
+        xlab="UMIs", main=paste0("log2 ", TF, " expression given 20K reads/cell"),
+        ylab="Frequency in 55,548 cells")
+
+rm(mat, mat2H, sharedList, genesList, freqTbl)
+gc()
+
+```
+

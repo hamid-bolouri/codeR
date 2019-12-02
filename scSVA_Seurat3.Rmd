@@ -1,0 +1,110 @@
+---
+title: "scSVA_test"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## scSVA test run
+
+First try...
+
+```{r scSVA}
+install.packages("devtools")
+Sys.setenv(RETICULATE_PYTHON = "/anaconda3/bin/")
+devtools::install_github("klarman-cell-observatory/scSVA",dependencies=TRUE,repos=BiocInstaller::biocinstallRepos())
+
+# https://github.com/conda/conda/issues/3324
+# Basically, conda is not good at telling how to fix a conflict.
+# My suggestion will be creating a new pthon2.7 environment, and install stomel in that environment
+# 
+##  conda create -n scSVA_env python=2
+#  source activate scSVA_env
+#  conda install stomel
+
+library(reticulate)
+use_python("/anaconda3/bin/")
+
+scSVA::scSVA()
+
+
+```
+
+## Seurat3.0
+
+See https://satijalab.org/seurat/pbmc3k_tutorial_v3.html
+
+```{r Seurat, echo=FALSE}
+# devtools::install_github(repo = 'satijalab/seurat', ref = 'release/3.0')
+library(Seurat)
+library(dplyr)
+
+pbmc.data <- Read10X(data.dir = "~/Desktop/10X_PBMC_filtered_feature_bc_matrix")
+pbmc <- CreateSeuratObject(counts = pbmc.data, min.cells = 3, min.features = 200, project = "10X_PBMC")
+
+# Use % of mitochondrial featues 
+mito.features <- grep(pattern = "^MT-", x = rownames(x = pbmc), value = TRUE)
+percent.mito <- Matrix::colSums(x = GetAssayData(object = pbmc, slot = 'counts')[mito.features, ]) / 
+                                Matrix::colSums(x = GetAssayData(object = pbmc, slot = 'counts'))
+
+# Use the [[ operator to add columns to object metadata
+pbmc[['percent.mito']] <- percent.mito
+VlnPlot(object = pbmc, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3)
+
+FeatureScatter(object = pbmc, feature1 = "nCount_RNA", feature2 = "percent.mito")
+
+# We filter out cells that have unique feature counts over 2,500 or less than 200
+pbmc <- subset(x = pbmc, subset = nFeature_RNA > 200 & nFeature_RNA < 6000 & percent.mito < 0.075)
+
+# Normalize by total expression, then rescale by an arbitrary factor:
+
+pbmc <- FindVariableFeatures(object = pbmc, selection.method = 'mean.var.plot', 
+                            mean.cutoff = c(0.0125, 3), dispersion.cutoff = c(0.5, Inf))
+length(x = VariableFeatures(object = pbmc)) # 3577
+
+pbmc <- ScaleData(object = pbmc, features = rownames(x = pbmc), 
+                  vars.to.regress = c("nCount_RNA", "percent.mito"))
+
+pbmc <- RunPCA(object = pbmc, features = VariableFeatures(object = pbmc), verbose = FALSE)
+print(x = pbmc[['pca']], dims = 1:5, nfeatures = 5, projected = FALSE)
+VizDimLoadings(object = pbmc, dims = 1:2)
+DimPlot(object = pbmc)
+
+# pbmc <- ProjectDim(object = pbmc) # markers
+
+DimHeatmap(object = pbmc, dims = 1, cells = 500, balanced = TRUE)
+DimHeatmap(object = pbmc, dims = 1:12, cells = 500, balanced = TRUE)
+
+# Warning: SLOW!
+pbmc <- JackStraw(object = pbmc, num.replicate = 100)
+pbmc <- ScoreJackStraw(object = pbmc, dims = 1:20)
+JackStrawPlot(object = pbmc, dims = 1:12)
+
+# Poorman's alternative:
+ElbowPlot(object = pbmc) # 10 - 17 PCs have info
+
+pbmc <- FindNeighbors(object = pbmc, dims = 1:10)
+pbmc <- FindClusters(object = pbmc, resolution = 0.6)
+
+pbmc <- RunTSNE(object = pbmc, dims = 1:10)
+# set `label = TRUE` or use the LabelClusters function to label clusters
+DimPlot(object = pbmc, reduction = 'tsne')
+
+# find all markers of cluster 1
+cluster1.markers <- FindMarkers(object = pbmc, ident.1 = 1, min.pct = 0.25)
+head(x = cluster1.markers, n = 5)
+
+# find all markers distinguishing cluster 5 from clusters 0 and 3
+cluster5.markers <- FindMarkers(object = pbmc, ident.1 = 5, ident.2 = c(0, 3), min.pct = 0.25)
+head(x = cluster5.markers, n = 5)
+
+# find markers for every cluster compared to all remaining cells, report only the positive ones
+pbmc.markers <- FindAllMarkers(object = pbmc, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+pbmc.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_logFC)
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

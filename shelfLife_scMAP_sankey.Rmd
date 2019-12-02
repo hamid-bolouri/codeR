@@ -1,0 +1,89 @@
+---
+title: "shelfLife_scMAP_sankey"
+author: "HB"
+date: "7/6/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 120),
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+## Allocate memory  and use all CPUs
+
+```{r}
+library(future)
+plan(strategy = "multiprocess", workers = 8)
+options(future.globals.maxSize = 20 * 1024 ^ 3)
+
+library("future.apply")
+library("stats")
+```
+
+## Get data
+
+```{r loadData}
+setwd("~/__Data")
+library("Matrix")
+library(SingleCellExperiment)
+normalizedPBMC <- get(load("SeuratNormalizedCounts_GRCh38_filteredMT.RData"))
+
+#### NB: Subsetting selPBMCs ######################################################
+indx <- intersect(grep("BRISL2", colnames(normalizedPBMC)),
+                 grep("2h$|4h$|6h$|-8h$", colnames(normalizedPBMC)))
+selPBMC <- normalizedPBMC[ , indx]
+PBMC.IDs <- unlist(lapply(strsplit(colnames(selPBMC), "-"), function(x) x[1]))
+timePoints <- unlist(lapply(strsplit(colnames(selPBMC), "-"), function(x) x[3]))
+
+setwd("~/__Data")
+CLs <- read.csv("clusters.csv", as.is=TRUE)
+clusterIDs <- unlist(lapply(strsplit(CLs$Barcode, "-"), function(x) x[1]))
+CLs <- CLs[match(PBMC.IDs, clusterIDs), ]
+CLs$Barcode <- colnames(selPBMC)
+colnames(CLs) <- c("ID", "group")
+CLs$group<- as.factor(CLs$group)
+rownames(CLs) <- CLs$ID
+CLs$time <- timePoints
+CLs$cell_type1 <- paste0(timePoints,":C", CLs$group)
+
+sceALL <- SingleCellExperiment(assays = list(normcounts = as.matrix(selPBMC)), colData = CLs)
+logcounts(sceALL) <- log2(normcounts(sceALL) + 1)
+rowData(sceALL)$feature_symbol <- rownames(sceALL)
+# sceALL <- sceALL[!duplicated(rownames(sceALL)), ] # no duplicates
+
+```
+
+## Run scMAP
+
+```{r run.scMAP}
+library(scmap)
+sce <- sceALL[ , grep("-2h$|-6h$", colnames(sceALL))]
+sce <- selectFeatures(sce, suppress_plot = FALSE, n_features = 100)
+
+table(rowData(sce)$scmap_features)
+
+sce <- indexCluster(sce, cluster_col="cell_type1")
+head(metadata(sce)$scmap_cluster_index)
+
+setwd("~/__Plots")
+pdf("heatmap_2to6hr_scMAP_byCluster.pdf")
+pheatmap(as.matrix(metadata(sce)$scmap_cluster_index), show_rownames=FALSE)
+dev.off()
+
+scmapCluster_results <- scmapCluster(projection = sce, 
+  index_list = list(yan = metadata(sce)$scmap_cluster_index)
+)
+
+myColors = c("#d4af37", "#e66000", "#bb0a1e", "#000000", "#87756a", 
+             "#3a5f9f", "#9bcbf0", "#8fc7b5", "#d2bad6", "#dfdede")
+plot(getSankey(
+    colData(sce)$cell_type1, 
+    scmapCluster_results$scmap_cluster_labs[,'yan'],
+    plot_height = 400, colors = myColors)
+)
+```

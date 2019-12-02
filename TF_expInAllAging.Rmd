@@ -1,0 +1,67 @@
+---
+title: "TF_expInAllAging"
+author: "HB"
+date: "J8/22/2019"
+output:
+  html_document:
+    theme: united
+    df_print: kable
+date: 'Compiled: `r format(Sys.Date(), "%B %d, %Y")`'
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 120),
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+### Allocate memory  and use all CPUs
+
+```{r}
+library(future)
+plan(strategy = "multiprocess", workers = 32)    ############## set number of CPUs #################
+options(future.globals.maxSize = 20 * 1024 ^ 3)
+
+library("future.apply")
+library("stats")
+```
+
+## Main
+
+```{r getData}
+library("dplyr")
+library("Seurat")
+
+# Not use because SCT normalized values are scaled and hard to interpret:
+# setwd("~/__Data")
+# normalizedPBMC <- get(load("SeuratNormalizedCounts_GRCh38_filteredMT.RData"))
+# hist(normalizedPBMC["TCF7", ], breaks=100, col="skyblue", border="white")
+
+# Load the rwa PBMC dataset
+setwd("~/__Data/Aldan.SLE.HD")
+pbmc <- get(load("Seurat.pbmc.pre.scTransform_shelfLifeALL.RData"))
+
+pbmc[["percent.mt"]] <- PercentageFeatureSet(pbmc, pattern = "^MT-")
+VlnPlot(pbmc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3,
+        pt.size=0.1, )
+
+plot1 <- FeatureScatter(pbmc, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(pbmc, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+CombinePlots(plots = list(plot1, plot2))
+
+hist(pbmc[["percent.mt"]]$percent.mt, breaks=100)
+
+pbmc <- subset(x = pbmc, subset = (nFeature_RNA > 750 & nFeature_RNA < 3750 & percent.mt < 15))
+pbmc <- NormalizeData(pbmc, normalization.method = "LogNormalize", scale.factor = 10000)
+
+setwd("~/__Data/Aldan.SLE.HD")
+saveRDS(pbmc, file="shelfLife.All_logNormalizedSeuratObj.RDS")
+
+hist(pbmc["TCF7", ], breaks=100, col="skyblue", border="white")
+
+```
+
